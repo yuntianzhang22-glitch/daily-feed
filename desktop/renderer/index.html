@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; img-src 'self' https://pbs.twimg.com https://abs.twimg.com; style-src 'self'; script-src 'self'" />
+  <title>Daily Feed</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" aria-label="来源">
+      <div class="drag-region"></div>
+      <h1 class="brand">Daily Feed</h1>
+      <nav>
+        <ul class="nav-list" id="views">
+          <li><button class="nav-item active" data-view="all">全部 <span class="badge" id="count-all"></span></button></li>
+          <li><button class="nav-item" data-view="unread">未读 <span class="badge" id="count-unread"></span></button></li>
+          <li><button class="nav-item" data-view="starred">收藏 <span class="badge" id="count-starred"></span></button></li>
+        </ul>
+        <h2 class="nav-heading">来源</h2>
+        <ul class="nav-list" id="sources"></ul>
+      </nav>
+      <div class="sidebar-footer">
+        <button class="btn update-banner" id="update-banner" hidden></button>
+        <button class="btn primary" id="fetch-btn">立即抓取</button>
+        <div class="btn-row">
+          <button class="btn" id="follows-btn">关注</button>
+          <button class="btn" id="settings-btn">设置</button>
+        </div>
+        <p class="status" id="status" role="status" aria-live="polite"></p>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="toolbar">
+        <div class="drag-region"></div>
+        <h2 id="view-title">全部</h2>
+        <input type="search" id="search" placeholder="搜索内容或作者" aria-label="搜索内容或作者" />
+        <select id="sort" aria-label="排序">
+          <option value="time">最新</option>
+          <option value="likes">最多点赞</option>
+          <option value="views">最多浏览</option>
+        </select>
+        <button class="btn" id="mark-read-btn">全部标为已读</button>
+      </header>
+      <section class="feed" id="feed" aria-label="帖子列表" tabindex="-1"></section>
+    </main>
+  </div>
+
+  <dialog id="follows-dialog" class="wide" aria-labelledby="follows-title">
+    <div class="dialog-body">
+      <h2 id="follows-title">关注的人</h2>
+      <div class="search-row">
+        <input type="search" id="roster-query" placeholder="在名单里搜索名字、用户名或简介"
+               aria-label="在内置名单里搜索" autocomplete="off" maxlength="60" />
+      </div>
+      <div class="chips" id="roster-cats" role="group" aria-label="按分类筛选"></div>
+      <ul class="user-list" id="roster-list" aria-label="内置名单"></ul>
+      <p class="hint" id="roster-hint"></p>
+      <h3 class="subheading">已关注 <span id="follow-count"></span></h3>
+      <ul class="user-list compact" id="follow-list" aria-label="已关注"></ul>
+      <p class="hint" id="follows-cost"></p>
+      <p class="error" id="follows-error" role="alert"></p>
+      <div class="dialog-actions">
+        <button class="btn" type="button" id="cancel-follows">取消</button>
+        <button class="btn primary" type="button" id="save-follows">保存</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="settings" aria-labelledby="settings-title">
+    <form method="dialog" id="settings-form">
+      <h2 id="settings-title">设置</h2>
+      <section class="panel" aria-labelledby="access-title">
+        <h3 id="access-title">访问码</h3>
+        <div class="search-row">
+          <input type="password" id="access-code" autocomplete="off" spellcheck="false"
+                 placeholder="管理员发给你的访问码，以 df_ 开头" aria-label="访问码" />
+          <button class="btn" type="button" id="save-access">验证并保存</button>
+        </div>
+        <p class="hint" id="access-hint"></p>
+        <details id="api-key-box">
+          <summary>管理员：改用自己的 twitterapi.io API Key 直连</summary>
+          <div class="search-row">
+            <input type="password" id="api-key" autocomplete="off" placeholder="已保存则留空不变" aria-label="API Key" />
+            <button class="btn" type="button" id="save-api-key">保存</button>
+          </div>
+          <p class="hint" id="key-hint"></p>
+        </details>
+      </section>
+      <div class="row">
+        <label>
+          自动抓取间隔（小时，0 为关闭）
+          <input type="number" id="interval-hours" min="0" max="720" step="1" required />
+          <span class="hint" id="interval-hint"></span>
+        </label>
+        <label>
+          每人每次最多保留（条，0 为不限）
+          <input type="number" id="max-per-target" min="0" max="100" />
+        </label>
+      </div>
+      <div class="row">
+        <label>
+          挑选方式
+          <select id="search-mode">
+            <option value="Top">热度优先</option>
+            <option value="Latest">时间优先</option>
+          </select>
+        </label>
+        <label>
+          估算用：每人每天平均发帖（条）
+          <input type="number" id="avg-posts" min="0" max="100" step="0.5" />
+        </label>
+      </div>
+      <label class="checkbox">
+        <input type="checkbox" id="include-replies" /> 包含回复
+      </label>
+      <details id="keywords-box">
+        <summary>高级：额外关键词（仅 API Key 直连可用）</summary>
+        <label>
+          每行一个，支持 X 高级搜索语法，如 "Claude Code" lang:en
+          <textarea id="keywords" rows="3" spellcheck="false"></textarea>
+        </label>
+      </details>
+      <section class="estimate" aria-labelledby="estimate-title">
+        <h3 id="estimate-title">月度费用预估</h3>
+        <div class="estimate-grid">
+          <div><span class="label">预计</span><strong id="est-expected">-</strong></div>
+          <div><span class="label">最少</span><span id="est-low">-</span></div>
+          <div><span class="label">最多</span><span id="est-high">-</span></div>
+          <div><span class="label">本月已用</span><span id="est-used">-</span></div>
+        </div>
+        <p class="hint" id="est-detail"></p>
+      </section>
+      <section class="panel" aria-labelledby="update-title">
+        <h3 id="update-title">版本与更新</h3>
+        <div class="update-row">
+          <span id="update-text">当前版本 -</span>
+          <button class="btn" type="button" id="check-update">检查更新</button>
+          <button class="btn primary" type="button" id="install-update" hidden>安装更新</button>
+        </div>
+        <progress id="update-progress" max="1" value="0" hidden></progress>
+        <p class="hint" id="update-notes"></p>
+        <p class="hint">更新只替换应用本身，配置、关注列表和帖子记录都保留。
+          <button class="link" type="button" id="reveal-data">打开数据目录</button></p>
+      </section>
+      <p class="error" id="settings-error" role="alert"></p>
+      <div class="dialog-actions">
+        <button class="btn" type="button" id="cancel-settings">取消</button>
+        <button class="btn primary" id="save-settings" value="save">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>

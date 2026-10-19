@@ -1,0 +1,10 @@
+{
+  "follows": [
+    "karpathy", "simonw", "emollick", "swyx",
+    "bcherny", "_catwu", "lennysan", "clairevo",
+    "naval", "paulg", "garrytan", "eladgil"
+  ],
+  "interval_hours": 84,
+  "max_per_target": 3,
+  "search_mode": "Top"
+}

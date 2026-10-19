@@ -1,0 +1,19 @@
+node_modules/
+dist/
+data/
+reports/
+*.db
+*.db-*
+__pycache__/
+.DS_Store
+.wrangler/
+.dev.vars
+.env*
+# 旧的 Python 版（已由 desktop/core 取代），保留在本地，不入库
+x_agent.py
+bridge.py
+test_x_agent.py
+config.json
+# 本地生成的访问码 / 口令不入库
+*admin_token*
+*test_code*

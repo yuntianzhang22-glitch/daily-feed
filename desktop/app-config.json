@@ -1,0 +1,5 @@
+{
+  "relayUrl": "https://daily-feed-relay.roam-travel-planner.workers.dev",
+  "updateManifestUrl": "https://daily-feed-relay.roam-travel-planner.workers.dev/v1/latest",
+  "rosterUrl": "https://daily-feed-relay.roam-travel-planner.workers.dev/v1/roster"
+}
