@@ -14,6 +14,8 @@ x_agent.py
 bridge.py
 test_x_agent.py
 config.json
+# 中转服务（部署配置、管理脚本、运维文档）只留在本地，不公开
+relay/
 # 本地生成的访问码 / 口令不入库
 *admin_token*
 *test_code*

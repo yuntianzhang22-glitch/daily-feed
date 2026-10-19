@@ -30,7 +30,6 @@ npm start
 ```
 
 - `desktop/`：Electron 应用（`core/` 是抓取、存储、配置、更新逻辑）
-- `relay/`：Cloudflare Worker 中转服务，持有 twitterapi.io 的 API Key；发布与管理见 [relay/README.md](relay/README.md)
 - `build/package-mac.sh`：打包 .app、更新 zip 和 `latest.json`
 
-安装包里没有任何密钥。API Key 只存在 Cloudflare Worker 的 Secret 里。
+安装包里没有任何密钥。
