@@ -242,12 +242,101 @@ function usd(n) {
   return '$' + n.toFixed(2);
 }
 
-function intervalText(hours) {
-  if (!hours) return '自动抓取关闭，只能手动抓取';
-  if (hours < 24) return `每 ${hours} 小时一次，约每天 ${(24 / hours).toFixed(1).replace(/\.0$/, '')} 次`;
-  const perWeek = 168 / hours;
-  if (perWeek >= 1) return `约每周 ${perWeek.toFixed(1).replace(/\.0$/, '')} 次`;
-  return `约每 ${(hours / 24).toFixed(1).replace(/\.0$/, '')} 天一次`;
+// ---- 抓取计划：频率（每周哪几天）+ 时间（时 / 分）
+
+const DAY_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+const DAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
+const MINUTE_STEP = 5;
+const pad2 = (n) => String(n).padStart(2, '0');
+
+const sched = { days: [1, 4], hour: 9, minute: 0 };
+
+function describeDays(days) {
+  if (!days.length) return '不自动抓取';
+  if (days.length === 7) return '每天';
+  const key = [...days].sort((a, b) => a - b).join(',');
+  if (key === '1,2,3,4,5') return '工作日';
+  if (key === '0,6') return '周末';
+  return DAY_ORDER.filter((d) => days.includes(d)).map((d) => DAY_NAMES[d]).join('、');
+}
+
+function scheduleSummary(days, time) {
+  if (!days.length) return '自动抓取已关闭，只能手动点「立即抓取」';
+  const n = days.length;
+  return `${describeDays(days)} ${time} 自动抓取，每周 ${n} 次，每月约 ${Math.round(n * 30 / 7)} 次`;
+}
+
+function timeValue() {
+  return `${pad2(sched.hour)}:${pad2(sched.minute)}`;
+}
+
+function dayBoxes() {
+  return [...document.querySelectorAll('#freq-menu input[name="day"]')];
+}
+
+function renderFreq() {
+  for (const b of dayBoxes()) b.checked = sched.days.includes(Number(b.value));
+  const all = $('day-all');
+  all.checked = sched.days.length === 7;
+  all.indeterminate = sched.days.length > 0 && sched.days.length < 7;
+  $('freq-text').textContent = describeDays(sched.days);
+  // 关闭自动抓取时时间没有意义
+  $('time-button').disabled = !sched.days.length;
+}
+
+function renderTime() {
+  $('time-text').textContent = timeValue();
+  for (const [col, value] of [[$('hour-col'), sched.hour], [$('minute-col'), sched.minute]]) {
+    for (const li of col.children) {
+      const on = Number(li.dataset.value) === value;
+      li.setAttribute('aria-selected', String(on));
+      li.tabIndex = -1;
+      if (on) col.setAttribute('aria-activedescendant', li.id);
+    }
+  }
+}
+
+function buildTimeColumns() {
+  const fill = (col, count, step, prefix) => {
+    for (let v = 0; v < count; v += step) {
+      col.append(el('li', { role: 'option', id: `${prefix}-${v}`, 'data-value': String(v), text: pad2(v) }));
+    }
+  };
+  fill($('hour-col'), 24, 1, 'h');
+  fill($('minute-col'), 60, MINUTE_STEP, 'm');
+}
+
+function scrollSelectedIntoView() {
+  for (const col of [$('hour-col'), $('minute-col')]) {
+    const sel = col.querySelector('[aria-selected="true"]');
+    if (sel) col.scrollTop = sel.offsetTop - col.clientHeight / 2 + sel.offsetHeight / 2;
+  }
+}
+
+function setOpen(button, menu, open) {
+  menu.hidden = !open;
+  button.setAttribute('aria-expanded', String(open));
+}
+
+function closeMenus(except) {
+  if (except !== 'freq') setOpen($('freq-button'), $('freq-menu'), false);
+  if (except !== 'time') setOpen($('time-button'), $('time-menu'), false);
+}
+
+function scheduleChanged() {
+  renderFreq();
+  renderTime();
+  updateEstimate();
+}
+
+function loadSchedule(cfg) {
+  sched.days = (cfg.schedule_days || []).map(Number);
+  const [h, m] = String(cfg.schedule_time || '09:00').split(':').map(Number);
+  sched.hour = h;
+  // 旧配置的分钟不一定是 5 的倍数，向下取整到最近的一格
+  sched.minute = Math.floor(m / MINUTE_STEP) * MINUTE_STEP;
+  closeMenus();
+  scheduleChanged();
 }
 
 // ---- 设置
@@ -258,7 +347,7 @@ let accessLimits = {};
 async function openSettings() {
   const [cfg, status] = await Promise.all([api.getConfig(), api.status()]);
   settingsCfg = cfg;
-  $('interval-hours').value = cfg.interval_hours ?? 84;
+  loadSchedule(cfg);
   $('max-per-target').value = cfg.max_per_target ?? 3;
   $('search-mode').value = cfg.search_mode === 'Latest' ? 'Latest' : 'Top';
   $('avg-posts').value = cfg.avg_posts_per_day ?? 2;
@@ -284,22 +373,23 @@ async function renderAccess() {
   setHint('access-hint', '正在检查…');
   const info = await api.accessInfo();
   accessLimits = info.limits || {};
-  $('interval-hours').min = accessLimits.min_interval_hours || 0;
   // 中转只放行按关注的人搜索，关键词在中转模式下不可用
   $('keywords-box').hidden = info.mode === 'relay';
   $('key-hint').textContent = info.hasApiKey ? '已保存（加密存储在系统钥匙串中）' : '尚未设置';
+  updateEstimate();
   if (!info.relayConfigured) {
     setHint('access-hint', '这个版本没有配置中转服务，请使用 API Key。');
     $('api-key-box').open = true;
     return;
   }
+  const maxDays = accessLimits.max_runs_per_week;
   if (info.mode === 'relay' && info.error) {
     setHint('access-hint', info.error, 'warn');
   } else if (info.mode === 'relay') {
     const q = info.quota || {};
     setHint('access-hint',
       `已连接（${info.name || '已验证'}）。本月共用额度已用 ${usd(q.used_usd)} / ${usd(q.limit_usd)}` +
-      (accessLimits.min_interval_hours ? `，抓取间隔不低于 ${accessLimits.min_interval_hours} 小时` : '') + '。', 'ok');
+      (maxDays && maxDays < 7 ? `，每周最多抓 ${maxDays} 天` : '') + '。', 'ok');
   } else if (info.mode === 'direct') {
     setHint('access-hint', '当前使用本机 API Key 直连。填写访问码后改走中转。');
   } else {
@@ -317,10 +407,9 @@ async function saveAccessCode() {
     await api.setAccessCode(code);
     $('access-code').value = '';
     await renderAccess();
-    // 限制（如最短间隔）可能把已有配置改了，重新读一遍
+    // 限制（如每周最多几天）可能把已有配置改了，重新读一遍
     settingsCfg = await api.getConfig();
-    $('interval-hours').value = settingsCfg.interval_hours;
-    updateEstimate();
+    loadSchedule(settingsCfg);
   } catch (err) {
     setHint('access-hint', errText(err), 'warn');
   } finally {
@@ -343,7 +432,8 @@ async function saveApiKey() {
 function settingsForm() {
   return {
     ...settingsCfg,
-    interval_hours: Number($('interval-hours').value) || 0,
+    schedule_days: [...sched.days].sort((a, b) => a - b),
+    schedule_time: timeValue(),
     max_per_target: Number($('max-per-target').value) || 0,
     search_mode: $('search-mode').value,
     avg_posts_per_day: Number($('avg-posts').value) || 0,
@@ -354,9 +444,9 @@ function settingsForm() {
 
 const updateEstimate = debounce(async () => {
   const cfg = settingsForm();
-  const min = accessLimits.min_interval_hours || 0;
-  $('interval-hint').textContent = intervalText(cfg.interval_hours) +
-    (min && cfg.interval_hours > 0 && cfg.interval_hours < min ? `（保存时会调整为 ${min} 小时）` : '');
+  const maxDays = accessLimits.max_runs_per_week;
+  $('schedule-hint').textContent = scheduleSummary(cfg.schedule_days, cfg.schedule_time) +
+    (maxDays && cfg.schedule_days.length > maxDays ? `。你的额度每周最多 ${maxDays} 天，保存时只保留前 ${maxDays} 天` : '');
   const [e, used] = await Promise.all([api.estimate(cfg), api.usage()]);
   const extra = e.keywords_high || 0;
   $('est-expected').textContent = usd(e.expected + extra);
@@ -365,7 +455,7 @@ const updateEstimate = debounce(async () => {
   $('est-used').textContent = usd(used.usd);
   if (!e.people && !cfg.keywords.length) {
     $('est-detail').textContent = '还没有关注任何人，点侧栏「关注」勾选。';
-  } else if (!cfg.interval_hours) {
+  } else if (!cfg.schedule_days.length) {
     $('est-detail').textContent = '自动抓取已关闭，只有手动抓取会产生费用（每次约 $0.003 × 组数）。';
   } else {
     $('est-detail').textContent =
@@ -379,13 +469,86 @@ const updateEstimate = debounce(async () => {
 async function saveSettings(e) {
   e.preventDefault();
   try {
-    const saved = await api.saveConfig(settingsForm());
+    const form = settingsForm();
+    const saved = await api.saveConfig(form);
     $('settings').close();
-    const adjusted = saved.interval_hours !== (Number($('interval-hours').value) || 0);
-    setStatus(adjusted ? `已保存，间隔调整为 ${saved.interval_hours} 小时` : '设置已保存');
+    const cut = form.schedule_days.length - saved.schedule_days.length;
+    setStatus(cut > 0 ? `已保存，抓取日调整为${describeDays(saved.schedule_days)}` : '设置已保存', cut > 0);
   } catch (err) {
     $('settings-error').textContent = errText(err);
   }
+}
+
+// ---- 选择器交互
+
+function initSchedulePickers() {
+  buildTimeColumns();
+
+  $('freq-button').addEventListener('click', () => {
+    const open = $('freq-menu').hidden;
+    closeMenus('freq');
+    setOpen($('freq-button'), $('freq-menu'), open);
+    if (open) $('day-all').focus();
+  });
+  $('time-button').addEventListener('click', () => {
+    const open = $('time-menu').hidden;
+    closeMenus('time');
+    setOpen($('time-button'), $('time-menu'), open);
+    if (open) { scrollSelectedIntoView(); $('hour-col').focus(); }
+  });
+
+  $('day-all').addEventListener('change', (e) => {
+    sched.days = e.target.checked ? [0, 1, 2, 3, 4, 5, 6] : [];
+    scheduleChanged();
+  });
+  for (const b of dayBoxes()) {
+    b.addEventListener('change', () => {
+      sched.days = dayBoxes().filter((x) => x.checked).map((x) => Number(x.value));
+      scheduleChanged();
+    });
+  }
+
+  const pick = (col, key) => {
+    col.addEventListener('click', (e) => {
+      const li = e.target.closest('li');
+      if (!li) return;
+      sched[key] = Number(li.dataset.value);
+      scheduleChanged();
+    });
+    // 键盘：上下键逐格移动，Enter 收起
+    col.addEventListener('keydown', (e) => {
+      const items = [...col.children];
+      const i = items.findIndex((li) => li.getAttribute('aria-selected') === 'true');
+      let next = i;
+      if (e.key === 'ArrowDown') next = Math.min(items.length - 1, i + 1);
+      else if (e.key === 'ArrowUp') next = Math.max(0, i - 1);
+      else if (e.key === 'Home') next = 0;
+      else if (e.key === 'End') next = items.length - 1;
+      else if (e.key === 'Enter') { e.preventDefault(); closeMenus(); $('time-button').focus(); return; }
+      else return;
+      e.preventDefault();
+      sched[key] = Number(items[next].dataset.value);
+      scheduleChanged();
+      items[next].scrollIntoView({ block: 'nearest' });
+    });
+  };
+  pick($('hour-col'), 'hour');
+  pick($('minute-col'), 'minute');
+
+  // 点外面或按 Esc 收起菜单；Esc 只收菜单，不关整个设置对话框
+  $('settings').addEventListener('click', (e) => {
+    if (!e.target.closest('.picker')) closeMenus();
+  });
+  $('settings').addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    const open = [['freq', 'freq-button', 'freq-menu'], ['time', 'time-button', 'time-menu']]
+      .find(([, , menu]) => !$(menu).hidden);
+    if (open) {
+      e.preventDefault();
+      closeMenus();
+      $(open[1]).focus();
+    }
+  });
 }
 
 // ---- 关注（内置名单，本地搜索，不花钱）
@@ -500,7 +663,7 @@ const updateFollowsCost = debounce(async () => {
   const cfg = { ...(await api.getConfig()), follows: followDraft };
   const e = await api.estimate(cfg);
   $('follows-cost').textContent = e.people
-    ? `按当前间隔（${intervalText(cfg.interval_hours)}），预计每月 ${usd(e.expected)}，最多 ${usd(e.high)}。`
+    ? `按当前计划（${describeDays(cfg.schedule_days || [])} ${cfg.schedule_time || ''}），预计每月 ${usd(e.expected)}，最多 ${usd(e.high)}。`
     : '';
 }, 150);
 
@@ -639,8 +802,9 @@ $('fetch-btn').addEventListener('click', fetchNow);
 $('settings-btn').addEventListener('click', openSettings);
 $('settings-form').addEventListener('submit', saveSettings);
 $('cancel-settings').addEventListener('click', () => $('settings').close());
-['interval-hours', 'max-per-target', 'search-mode', 'avg-posts', 'include-replies', 'keywords']
+['max-per-target', 'search-mode', 'avg-posts', 'include-replies', 'keywords']
   .forEach((id) => $(id).addEventListener('input', updateEstimate));
+initSchedulePickers();
 $('save-access').addEventListener('click', saveAccessCode);
 $('access-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); saveAccessCode(); } });
 $('save-api-key').addEventListener('click', saveApiKey);

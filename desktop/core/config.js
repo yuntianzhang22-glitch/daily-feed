@@ -3,13 +3,16 @@
 const fs = require('fs');
 const path = require('path');
 const { cleanUsernames } = require('./fetcher');
+const { cleanDays, cleanTime, daysFromInterval, DEFAULT_DAYS, DEFAULT_TIME } = require('./schedule');
 
-const CONFIG_VERSION = 2;
+const CONFIG_VERSION = 3;
 const DEFAULTS = {
   version: CONFIG_VERSION,
   follows: [],
   keywords: [],
-  interval_hours: 84,
+  // 每周哪几天抓（0=周日 … 6=周六），空数组表示不自动抓取；几点抓
+  schedule_days: DEFAULT_DAYS,
+  schedule_time: DEFAULT_TIME,
   max_per_target: 3,
   search_mode: 'Top',
   include_replies: false,
@@ -25,10 +28,13 @@ function num(value, lo, hi, dflt, int = true) {
   return Math.max(lo, Math.min(hi, int ? Math.trunc(n) : n));
 }
 
-// v0（最早的 accounts/keywords/schedule_days 格式）和 v1（Python 版）→ v2
+// v0：accounts + 关键词 + schedule_days/schedule_time（最早的版本）
+// v1/v2：follows + interval_hours（Python 版和 0.2.0）
+// v3：follows + schedule_days/schedule_time
 function migrate(raw) {
   const cfg = { ...raw };
-  if (!('follows' in cfg)) {
+  const isV0 = !('follows' in cfg);
+  if (isV0) {
     const follows = [...(cfg.accounts || [])];
     const keywords = [];
     for (const k of cfg.keywords || []) {
@@ -41,26 +47,32 @@ function migrate(raw) {
     cfg.follows = follows;
     cfg.keywords = keywords;
   }
-  if (!('interval_hours' in cfg)) {
-    const days = cfg.schedule_days;
-    cfg.interval_hours = days && days.length ? Math.round(168 / days.length) : 0;
+  // v0 本来就是按周几 + 时间，保留；v1/v2 的小时间隔换算成周几，时间用默认值
+  if (!isV0 || !Array.isArray(cfg.schedule_days)) {
+    if (!Array.isArray(cfg.schedule_days)) cfg.schedule_days = daysFromInterval(cfg.interval_hours);
+    if (!cfg.schedule_time) cfg.schedule_time = DEFAULT_TIME;
   }
-  for (const k of ['accounts', 'schedule_days', 'schedule_time']) delete cfg[k];
+  for (const k of ['accounts', 'interval_hours']) delete cfg[k];
   cfg.version = CONFIG_VERSION;
   return cfg;
 }
 
+// 共用额度时一周最多抓几次（中转下发的 max_runs_per_week），超出时保留靠前的几天
+function capDays(days, maxPerWeek) {
+  const max = Number(maxPerWeek) || 0;
+  if (!max || days.length <= max) return days;
+  // 按周一到周日的顺序保留
+  return [1, 2, 3, 4, 5, 6, 0].filter((d) => days.includes(d)).slice(0, max).sort((a, b) => a - b);
+}
+
 function clean(cfg, limits = {}) {
-  const minHours = Number(limits.min_interval_hours) || 0;
-  let hours = num(cfg.interval_hours, 0, 24 * 30, DEFAULTS.interval_hours);
-  // 共用额度时限制最短间隔，0（关闭）不受影响
-  if (hours > 0 && hours < minHours) hours = minHours;
   const maxFollows = Number(limits.max_follows) || 500;
   return {
     version: CONFIG_VERSION,
     follows: cleanUsernames(cfg.follows).slice(0, maxFollows),
     keywords: (cfg.keywords || []).map((k) => String(k).trim()).filter(Boolean).slice(0, 20),
-    interval_hours: hours,
+    schedule_days: capDays(cleanDays(cfg.schedule_days ?? DEFAULTS.schedule_days), limits.max_runs_per_week),
+    schedule_time: cleanTime(cfg.schedule_time),
     max_per_target: num(cfg.max_per_target, 0, 100, DEFAULTS.max_per_target),
     search_mode: cfg.search_mode === 'Latest' ? 'Latest' : 'Top',
     include_replies: Boolean(cfg.include_replies),
@@ -119,4 +131,4 @@ class ConfigFile {
   }
 }
 
-module.exports = { ConfigFile, migrate, clean, DEFAULTS, CONFIG_VERSION };
+module.exports = { ConfigFile, migrate, clean, capDays, DEFAULTS, CONFIG_VERSION };

@@ -4,7 +4,8 @@
     "bcherny", "_catwu", "lennysan", "clairevo",
     "naval", "paulg", "garrytan", "eladgil"
   ],
-  "interval_hours": 84,
+  "schedule_days": [1, 4],
+  "schedule_time": "09:00",
   "max_per_target": 3,
   "search_mode": "Top"
 }

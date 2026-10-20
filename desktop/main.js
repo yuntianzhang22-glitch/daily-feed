@@ -10,6 +10,7 @@ const { ConfigFile } = require('./core/config');
 const { FeedClient } = require('./core/client');
 const { runOnce, estimateMonthlyCost, cleanUsernames } = require('./core/fetcher');
 const { Updater } = require('./core/updater');
+const { nextSlot, prevSlot } = require('./core/schedule');
 
 // 构建时写入的服务地址（中转、更新清单、名单）。开发时可以用环境变量覆盖。
 const APP_CONFIG = (() => {
@@ -229,9 +230,8 @@ function updateBadge() {
   } catch { /* 忽略 */ }
 }
 
-// ------------------------------------------------------------ 定时：按小时间隔，错过的在启动或唤醒时补抓
-
-const MAX_TIMEOUT = 2 ** 31 - 1;
+// ------------------------------------------------------------ 定时：每周选定的几天、固定时间点
+// 错过的时间点（关机、睡眠、应用没开）在下次启动或唤醒时补抓一次，不会连补多次。
 
 function readLastAuto() {
   try { return Number(fs.readFileSync(P.lastAuto(), 'utf8')) || 0; } catch { return 0; }
@@ -245,22 +245,24 @@ function schedule() {
   clearTimeout(timer);
   timer = null;
   nextRun = null;
-  const hours = Number(config.load().interval_hours) || 0;
-  if (hours <= 0 || accessMode().mode === 'none') {
+  const cfg = config.load();
+  if (!cfg.schedule_days.length || accessMode().mode === 'none') {
     sendToUi('schedule', { next: null });
     return;
   }
-  const now = Date.now();
-  let lastAuto = readLastAuto();
-  if (!lastAuto) { lastAuto = now; writeLastAuto(now); }
-  const due = lastAuto + hours * 3600 * 1000;
-  if (due <= now) {
-    writeLastAuto(now);
+  const now = new Date();
+  const lastAuto = readLastAuto();
+  // 首次启用只记录，不立即抓
+  if (!lastAuto) writeLastAuto(now.getTime());
+  const prev = prevSlot(cfg.schedule_days, cfg.schedule_time, now);
+  if (lastAuto && prev && prev.getTime() > lastAuto) {
+    writeLastAuto(now.getTime());
     doFetch();
-    return schedule();
   }
-  nextRun = new Date(due).toISOString();
-  timer = setTimeout(schedule, Math.min(due - now, MAX_TIMEOUT));
+  const next = nextSlot(cfg.schedule_days, cfg.schedule_time, now);
+  nextRun = next.toISOString();
+  // 最多 7 天，在 setTimeout 的上限（约 24.8 天）以内
+  timer = setTimeout(schedule, Math.max(1000, next - now));
   sendToUi('schedule', { next: nextRun });
 }
 
@@ -398,6 +400,15 @@ function createWindow() {
   });
 }
 
+// 时间选择器的分钟每 5 分钟一格；已保存的时间不是 5 的倍数时（如旧配置）对齐到整格，
+// 让界面显示的时间和实际抓取的时间一致
+function alignScheduleTime() {
+  const cfg = config.load();
+  const [h, m] = cfg.schedule_time.split(':').map(Number);
+  const aligned = Math.floor(m / 5) * 5;
+  if (aligned !== m) config.save({ ...cfg, schedule_time: `${String(h).padStart(2, '0')}:${String(aligned).padStart(2, '0')}` }, limits);
+}
+
 // 只允许一个实例，否则两个进程会同时写数据库
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -412,6 +423,7 @@ if (!app.requestSingleInstanceLock()) {
       app.quit();
       return;
     }
+    alignScheduleTime();
     initUpdater();
     createWindow();
     refreshLimits().catch(() => {});

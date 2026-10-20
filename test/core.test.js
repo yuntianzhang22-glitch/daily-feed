@@ -10,6 +10,7 @@ const { ConfigFile, migrate, clean } = require('../desktop/core/config');
 const { FeedClient } = require('../desktop/core/client');
 const { followGroups, runOnce, estimateMonthlyCost, cleanUsernames } = require('../desktop/core/fetcher');
 const { compareVersions, validateManifest, Updater, currentBundlePath } = require('../desktop/core/updater');
+const { nextSlot, prevSlot, weeklyGapsHours, daysFromInterval, describeDays } = require('../desktop/core/schedule');
 
 const tmpdir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'df-test-'));
 
@@ -110,23 +111,36 @@ test('配置：Python 版 / 更早格式自动迁移，并先备份', () => {
   const cfg = new ConfigFile(file).load();
   assert.deepStrictEqual(cfg.follows, ['OpenAI', 'naval', 'paulg']);
   assert.deepStrictEqual(cfg.keywords, ['AI agent min_faves:50']);
-  assert.strictEqual(cfg.interval_hours, 84);
+  // 最早版本本来就是按周几 + 时间，原样保留
+  assert.deepStrictEqual(cfg.schedule_days, [1, 4]);
+  assert.strictEqual(cfg.schedule_time, '09:00');
   assert.strictEqual(cfg.max_per_target, 8);
-  assert.strictEqual(cfg.version, 2);
-  assert.ok(!('schedule_days' in JSON.parse(fs.readFileSync(file, 'utf8'))));
+  assert.strictEqual(cfg.version, 3);
+  const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.ok(!('accounts' in saved) && !('interval_hours' in saved));
   assert.strictEqual(fs.readdirSync(path.join(dir, 'backups')).length, 1);
   // 再次读取不会重复迁移或备份
   new ConfigFile(file).load();
   assert.strictEqual(fs.readdirSync(path.join(dir, 'backups')).length, 1);
 });
 
-test('配置：Python v1 格式（follows + interval_hours，无 version）原样保留', () => {
-  const dir = tmpdir();
-  const file = path.join(dir, 'config.json');
-  const v1 = { follows: ['karpathy', 'naval'], keywords: [], interval_hours: 84, max_per_target: 8, search_mode: 'Top', avg_posts_per_day: 2 };
-  fs.writeFileSync(file, JSON.stringify(v1));
-  const cfg = new ConfigFile(file).load();
-  for (const k of Object.keys(v1)) assert.deepStrictEqual(cfg[k], v1[k], k);
+test('配置：0.2.0 / Python 版的小时间隔迁移成每周几天，其余设置原样保留', () => {
+  const cases = [
+    [84, [1, 4]], [24, [0, 1, 2, 3, 4, 5, 6]], [6, [0, 1, 2, 3, 4, 5, 6]],
+    [168, [1]], [56, [1, 3, 5]], [0, []],
+  ];
+  for (const [hours, days] of cases) {
+    const dir = tmpdir();
+    const file = path.join(dir, 'config.json');
+    const v2 = { version: 2, follows: ['karpathy', 'naval'], keywords: [], interval_hours: hours, max_per_target: 8, search_mode: 'Latest', avg_posts_per_day: 10 };
+    fs.writeFileSync(file, JSON.stringify(v2));
+    const cfg = new ConfigFile(file).load();
+    assert.deepStrictEqual(cfg.schedule_days, days, `${hours} 小时`);
+    assert.strictEqual(cfg.schedule_time, '09:00');
+    assert.deepStrictEqual([cfg.follows, cfg.max_per_target, cfg.search_mode, cfg.avg_posts_per_day],
+      [v2.follows, 8, 'Latest', 10]);
+    assert.ok(!('interval_hours' in cfg));
+  }
 });
 
 test('配置：损坏的文件不会让应用起不来', () => {
@@ -138,14 +152,19 @@ test('配置：损坏的文件不会让应用起不来', () => {
   assert.ok(fs.readdirSync(path.join(dir, 'backups'))[0].startsWith('config-corrupt'));
 });
 
-test('配置：边界值与共用额度下的最短间隔', () => {
-  const c = clean({ follows: ['@a', 'bad!', 'A'], interval_hours: '-5', max_per_target: 'abc', search_mode: 'x' });
+test('配置：边界值、非法的天和时间、共用额度下每周最多几天', () => {
+  const c = clean({ follows: ['@a', 'bad!', 'A'], schedule_days: [4, 1, 1, 9, -1, '3', 'x'], schedule_time: '25:99', max_per_target: 'abc', search_mode: 'x' });
   assert.deepStrictEqual(c.follows, ['a']);
-  assert.strictEqual(c.interval_hours, 0);
+  assert.deepStrictEqual(c.schedule_days, [1, 3, 4]);
+  assert.strictEqual(c.schedule_time, '09:00');
   assert.strictEqual(c.max_per_target, 3);
   assert.strictEqual(c.search_mode, 'Top');
-  assert.strictEqual(clean({ interval_hours: 1 }, { min_interval_hours: 6 }).interval_hours, 6);
-  assert.strictEqual(clean({ interval_hours: 0 }, { min_interval_hours: 6 }).interval_hours, 0);
+  assert.strictEqual(clean({ schedule_time: '7:5' }).schedule_time, '07:05');
+  assert.deepStrictEqual(clean({ schedule_days: [] }).schedule_days, []);
+  // 每周最多 3 天：按周一到周日的顺序保留前 3 天
+  assert.deepStrictEqual(clean({ schedule_days: [0, 1, 2, 3, 4, 5, 6] }, { max_runs_per_week: 3 }).schedule_days, [1, 2, 3]);
+  assert.deepStrictEqual(clean({ schedule_days: [0, 6] }, { max_runs_per_week: 1 }).schedule_days, [6]);
+  assert.deepStrictEqual(clean({ schedule_days: [1, 4] }, { max_runs_per_week: 7 }).schedule_days, [1, 4]);
   assert.strictEqual(clean({ follows: ['a', 'b', 'c'] }, { max_follows: 2 }).follows.length, 2);
 });
 
@@ -208,13 +227,48 @@ test('抓取：5xx 重试后成功，额度用尽不重试', async () => {
   assert.strictEqual(m, 1);
 });
 
-test('费用估算与 Python 版结果一致', () => {
+test('费用估算：按每周抓取日计算，间隔不均匀时分别计算', () => {
   const twelve = Array.from({ length: 12 }, (_, i) => `u${i}`);
-  const a = estimateMonthlyCost({ follows: twelve, interval_hours: 84, avg_posts_per_day: 2 });
-  assert.deepStrictEqual([a.runs, a.requests, a.tweets, a.low, a.expected, a.high], [9, 26, 514, 0.0039, 0.0771, 0.0771]);
-  const b = estimateMonthlyCost({ follows: twelve, interval_hours: 6, avg_posts_per_day: 2 });
-  assert.deepStrictEqual([b.runs, b.requests, b.tweets, b.low, b.expected, b.high], [120, 360, 720, 0.054, 0.108, 1.08]);
-  assert.strictEqual(estimateMonthlyCost({ follows: twelve, interval_hours: 0 }).high, 0);
+  const W = 30 / 7;
+  const usd = (credits) => Math.round((credits / 100000) * 10000) / 10000;
+  // 每天：每组每次 4 人 × 2 条 = 8 条
+  const daily = estimateMonthlyCost({ follows: twelve, schedule_days: [0, 1, 2, 3, 4, 5, 6], avg_posts_per_day: 2 });
+  assert.strictEqual(daily.runs, 30);
+  assert.strictEqual(daily.expected, usd(7 * W * 3 * 8 * 15));
+  assert.strictEqual(daily.low, usd(7 * W * 3 * 15));
+  assert.strictEqual(daily.high, usd(7 * W * 3 * 20 * 15));
+  // 周一、周四：间隔 72 和 96 小时，每组新帖 24 和 32 条，都超过一页 20 条
+  const twice = estimateMonthlyCost({ follows: twelve, schedule_days: [1, 4], avg_posts_per_day: 2 });
+  assert.strictEqual(twice.runs, 9);
+  assert.strictEqual(twice.expected, usd(2 * W * 3 * 20 * 15));
+  assert.strictEqual(twice.expected, twice.high);
+  // 每人每天 0.5 条时，72 小时 6 条、96 小时 8 条，按实际条数计费
+  const quiet = estimateMonthlyCost({ follows: twelve, schedule_days: [1, 4], avg_posts_per_day: 0.5 });
+  assert.strictEqual(quiet.expected, usd(W * 3 * (6 + 8) * 15));
+  // 不自动抓取
+  assert.strictEqual(estimateMonthlyCost({ follows: twelve, schedule_days: [] }).high, 0);
+});
+
+test('抓取计划：下次 / 上次时间点、跨周、恰好整点', () => {
+  // 2026-10-19 是周一
+  const at = (d, h, m = 0) => new Date(2026, 9, d, h, m);
+  const fmt = (d) => `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const days = [1, 4];
+  assert.strictEqual(fmt(nextSlot(days, '09:00', at(19, 8))), '10/19 09:00');
+  assert.strictEqual(fmt(nextSlot(days, '09:00', at(19, 9))), '10/22 09:00');
+  assert.strictEqual(fmt(nextSlot(days, '09:00', at(24, 12))), '10/26 09:00');
+  assert.strictEqual(fmt(prevSlot(days, '09:00', at(19, 9))), '10/19 09:00');
+  assert.strictEqual(fmt(prevSlot(days, '09:00', at(19, 8, 59))), '10/15 09:00');
+  assert.strictEqual(fmt(nextSlot([1], '23:55', at(19, 23, 56))), '10/26 23:55');
+  assert.strictEqual(fmt(nextSlot([0, 1, 2, 3, 4, 5, 6], '00:00', at(19, 0, 0))), '10/20 00:00');
+  assert.strictEqual(nextSlot([], '09:00', at(19, 8)), null);
+  assert.deepStrictEqual(weeklyGapsHours([1, 4]), [72, 96]);
+  assert.deepStrictEqual(weeklyGapsHours([3]), [168]);
+  assert.deepStrictEqual(daysFromInterval(84), [1, 4]);
+  assert.strictEqual(describeDays([0, 1, 2, 3, 4, 5, 6]), '每天');
+  assert.strictEqual(describeDays([1, 2, 3, 4, 5]), '工作日');
+  assert.strictEqual(describeDays([0, 6]), '周末');
+  assert.strictEqual(describeDays([0, 3, 1]), '周一、周三、周日');
 });
 
 test('更新：版本比较与清单校验', () => {

@@ -90,16 +90,47 @@
         </details>
       </section>
       <div class="row">
-        <label>
-          自动抓取间隔（小时，0 为关闭）
-          <input type="number" id="interval-hours" min="0" max="720" step="1" required />
-          <span class="hint" id="interval-hint"></span>
-        </label>
-        <label>
-          每人每次最多保留（条，0 为不限）
-          <input type="number" id="max-per-target" min="0" max="100" />
-        </label>
+        <div class="field">
+          <span class="field-label" id="freq-label">抓取频率</span>
+          <div class="picker" id="freq-picker">
+            <button class="picker-button" type="button" id="freq-button"
+                    aria-haspopup="true" aria-expanded="false" aria-controls="freq-menu"
+                    aria-labelledby="freq-label freq-button">
+              <span id="freq-text">-</span><span class="caret" aria-hidden="true">▾</span>
+            </button>
+            <div class="picker-menu" id="freq-menu" role="group" aria-label="每周抓取日" hidden>
+              <label class="menu-item all"><input type="checkbox" id="day-all" /> 每天</label>
+              <div class="menu-sep" role="separator"></div>
+              <label class="menu-item"><input type="checkbox" name="day" value="1" /> 周一</label>
+              <label class="menu-item"><input type="checkbox" name="day" value="2" /> 周二</label>
+              <label class="menu-item"><input type="checkbox" name="day" value="3" /> 周三</label>
+              <label class="menu-item"><input type="checkbox" name="day" value="4" /> 周四</label>
+              <label class="menu-item"><input type="checkbox" name="day" value="5" /> 周五</label>
+              <label class="menu-item"><input type="checkbox" name="day" value="6" /> 周六</label>
+              <label class="menu-item"><input type="checkbox" name="day" value="0" /> 周日</label>
+            </div>
+          </div>
+        </div>
+        <div class="field">
+          <span class="field-label" id="time-label">抓取时间</span>
+          <div class="picker" id="time-picker">
+            <button class="picker-button" type="button" id="time-button"
+                    aria-haspopup="true" aria-expanded="false" aria-controls="time-menu"
+                    aria-labelledby="time-label time-button">
+              <span id="time-text">09:00</span><span class="caret" aria-hidden="true">▾</span>
+            </button>
+            <div class="picker-menu time-menu" id="time-menu" hidden>
+              <ul class="time-col" id="hour-col" role="listbox" aria-label="时" tabindex="0"></ul>
+              <ul class="time-col" id="minute-col" role="listbox" aria-label="分" tabindex="0"></ul>
+            </div>
+          </div>
+        </div>
       </div>
+      <p class="hint" id="schedule-hint"></p>
+      <label>
+        每人每次最多保留（条，0 为不限）
+        <input type="number" id="max-per-target" min="0" max="100" />
+      </label>
       <div class="row">
         <label>
           挑选方式

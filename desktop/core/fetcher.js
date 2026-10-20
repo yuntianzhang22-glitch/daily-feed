@@ -1,4 +1,6 @@
 // 抓取逻辑和费用估算，从原 Python 版移植，状态键与 Python 版相同，可无缝接着抓。
+const { weeklyGapsHours } = require('./schedule');
+
 const USERNAME_RE = /^[A-Za-z0-9_]{1,15}$/;
 const PAGE_SIZE = 20;
 const CREDITS_PER_TWEET = 15;
@@ -104,30 +106,36 @@ async function runOnce(client, store, cfg, { log = () => {}, errors = [] } = {})
   return results;
 }
 
-// 估算每月费用（美元）。费用取决于接口「返回」了多少条，不是本地保留多少条
+// 估算每月费用（美元）。费用取决于接口「返回」了多少条，不是本地保留多少条。
+// 每周几天抓，相邻两次的间隔可能不同（周一、周四 → 72 和 96 小时），按每个间隔分别算新帖数。
+const WEEKS_PER_MONTH = 30 / 7;
+
 function estimateMonthlyCost(cfg) {
   const groups = followGroups(cfg);
   const people = groups.reduce((s, g) => s + g.length, 0);
-  const hours = Number(cfg.interval_hours) || 0;
+  const gaps = weeklyGapsHours(cfg.schedule_days);
   const keywords = (cfg.keywords || []).filter(Boolean).length;
   const empty = { runs: 0, requests: 0, tweets: 0, low: 0, expected: 0, high: 0, people, groups: groups.length, keywords_high: 0 };
-  if ((!groups.length && !keywords) || hours <= 0) return empty;
-  const runs = (30 * 24) / hours;
+  if ((!groups.length && !keywords) || !gaps.length) return empty;
+  const runs = gaps.length * WEEKS_PER_MONTH;
   const maxPages = Math.max(1, Number(cfg.max_pages) || 1);
   const avg = Number(cfg.avg_posts_per_day ?? 2);
 
   const costFor = (perPersonPerDay) => {
     let credits = 0; let tweets = 0; let requests = 0;
-    for (const g of groups) {
-      const fresh = Math.min((g.length * perPersonPerDay * hours) / 24, PAGE_SIZE * maxPages);
-      const pages = Math.max(1, Math.ceil(fresh / PAGE_SIZE));
-      for (let p = 0; p < pages; p++) {
-        credits += Math.max(MIN_CREDITS_PER_CALL, CREDITS_PER_TWEET * Math.min(PAGE_SIZE, fresh - p * PAGE_SIZE));
+    for (const hours of gaps) {
+      for (const g of groups) {
+        const fresh = Math.min((g.length * perPersonPerDay * hours) / 24, PAGE_SIZE * maxPages);
+        const pages = Math.max(1, Math.ceil(fresh / PAGE_SIZE));
+        for (let p = 0; p < pages; p++) {
+          credits += Math.max(MIN_CREDITS_PER_CALL, CREDITS_PER_TWEET * Math.min(PAGE_SIZE, fresh - p * PAGE_SIZE));
+        }
+        tweets += fresh;
+        requests += pages;
       }
-      tweets += fresh;
-      requests += pages;
     }
-    return [credits * runs, tweets * runs, requests * runs];
+    const k = WEEKS_PER_MONTH;
+    return [credits * k, tweets * k, requests * k];
   };
   const [low] = costFor(0);
   const [expected, tweets, requests] = costFor(avg);

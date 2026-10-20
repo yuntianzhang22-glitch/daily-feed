@@ -261,5 +261,46 @@ progress { width: 100%; height: 6px; accent-color: var(--accent); }
   border-color: var(--accent); color: var(--accent); font-weight: 600;
 }
 .update-banner:hover { background: #10202d; }
+
+/* ---------- 抓取频率 / 时间选择器 */
+
+.field { display: grid; gap: 6px; }
+.field-label { font-size: 13px; color: var(--muted); }
+.picker { position: relative; }
+.picker-button {
+  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 8px 10px; border-radius: 8px; cursor: pointer; text-align: left;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text);
+}
+.picker-button:hover { border-color: #3e4449; }
+.picker-button[aria-expanded="true"] { border-color: var(--accent); }
+.picker-button .caret { color: var(--muted); font-size: 11px; }
+.picker-menu {
+  position: absolute; z-index: 10; top: calc(100% + 4px); left: 0; min-width: 100%;
+  padding: 6px; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--panel); box-shadow: 0 8px 24px rgba(0, 0, 0, .5);
+}
+.menu-item {
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px;
+  color: var(--text); font-size: 14px; cursor: pointer;
+}
+.menu-item:hover { background: #1f2327; }
+.menu-item input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+.menu-item.all { font-weight: 600; }
+.menu-sep { height: 1px; margin: 4px 0; background: var(--border); }
+
+.time-menu { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.time-menu[hidden] { display: none; }
+.time-col {
+  list-style: none; margin: 0; padding: 0; height: 216px; overflow-y: auto;
+  scroll-snap-type: y mandatory; border-radius: 6px;
+}
+.time-col:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+.time-col li {
+  scroll-snap-align: start; padding: 6px 0; text-align: center; border-radius: 6px;
+  cursor: pointer; font-variant-numeric: tabular-nums;
+}
+.time-col li:hover { background: #1f2327; }
+.time-col li[aria-selected="true"] { background: var(--accent); color: #fff; font-weight: 600; }
 .error { font-size: 13px; color: var(--danger); margin: 0; min-height: 1em; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
