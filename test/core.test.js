@@ -320,6 +320,45 @@ test('帖子内容：引用、图片、链接、emoji 下标、转推、引用�
   assert.strictEqual(extractPost('{bad'), null);
 });
 
+test('帖子媒体：大图地址、视频 mp4 按码率排序、只接受 X 的服务器', () => {
+  const v = extractPost({
+    id: '1', url: 'https://x.com/a/status/1', text: '', author: { userName: 'a' },
+    extendedEntities: { media: [
+      { type: 'photo', media_url_https: 'https://pbs.twimg.com/media/p.jpg', indices: [0, 0] },
+      { type: 'video', media_url_https: 'https://pbs.twimg.com/thumb/v.jpg', indices: [0, 0], video_info: { duration_millis: 59893, variants: [
+        { content_type: 'application/x-mpegURL', url: 'https://video.twimg.com/v/pl/x.m3u8' },
+        { content_type: 'video/mp4', bitrate: 2176000, url: 'https://video.twimg.com/v/vid/avc1/1280x720/c.mp4?tag=1' },
+        { content_type: 'video/mp4', bitrate: 256000, url: 'https://video-s.twimg.com/v/vid/avc1/480x270/a.mp4?tag=1' },
+        { content_type: 'video/mp4', bitrate: 832000, url: 'https://evil.example/b.mp4' },
+        { content_type: 'video/mp4', bitrate: 950000, url: 'https://video-s.twimg.com/v/vid/avc1/480x852/d.mp4?tag=1' },
+      ] } },
+      { type: 'animated_gif', media_url_https: 'https://pbs.twimg.com/thumb/g.jpg', indices: [0, 0], video_info: { variants: [
+        { content_type: 'video/mp4', bitrate: 0, url: 'https://video.twimg.com/tweet_video/g.mp4' },
+      ] } },
+    ] },
+  });
+  const [photo, video, gif] = v.media;
+  assert.strictEqual(photo.full, 'https://pbs.twimg.com/media/p.jpg?name=large');
+  assert.deepStrictEqual(photo.sources, []);
+  assert.strictEqual(video.type, 'video');
+  assert.strictEqual(video.duration, 60);
+  assert.deepStrictEqual(video.sources.map((s) => [s.bitrate, s.label]), [[256000, '270p'], [950000, '480p'], [2176000, '720p']]);
+  assert.strictEqual(gif.type, 'gif');
+  assert.strictEqual(gif.sources[0].url, 'https://video.twimg.com/tweet_video/g.mp4');
+});
+
+test('真实数据库：每个视频都解析出可播放的 mp4', { skip: !fs.existsSync(path.join(os.homedir(), 'Library/Application Support/Daily Feed/tweets.db')) }, () => {
+  const copy = path.join(tmpdir(), 'real.db');
+  fs.copyFileSync(path.join(os.homedir(), 'Library/Application Support/Daily Feed/tweets.db'), copy);
+  const s = new Store(copy);
+  const media = s.list({ limit: 10000 }).flatMap((t) => [...(t.post?.media || []), ...(t.post?.quoted?.media || [])]);
+  const videos = media.filter((m) => m.type !== 'photo');
+  assert.ok(videos.length > 0);
+  assert.ok(videos.every((m) => m.sources.length > 0 && m.sources.every((x) => /^https:\/\/video(-s)?\.twimg\.com\//.test(x.url))));
+  assert.ok(media.filter((m) => m.type === 'photo').every((m) => m.full.startsWith('https://pbs.twimg.com/')));
+  s.close();
+});
+
 test('Store：list 返回解析好的帖子内容', () => {
   const s = new Store(path.join(tmpdir(), 't.db'));
   s.save({ ...tweet(1, 'alice'), quoted_tweet: { id: '2', text: 'ctx', url: 'https://x.com/bob/status/2', author: { userName: 'bob' } } }, 'user:alice', 'now');

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; img-src 'self' https://pbs.twimg.com https://abs.twimg.com; style-src 'self'; script-src 'self'" />
+        content="default-src 'self'; img-src 'self' https://pbs.twimg.com https://abs.twimg.com; media-src https://video.twimg.com https://video-s.twimg.com; style-src 'self'; script-src 'self'" />
   <title>Daily Feed</title>
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -192,6 +192,23 @@
         <button class="btn primary" id="save-settings" value="save">保存</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="viewer" class="viewer" aria-label="查看图片和视频">
+    <div class="viewer-bar">
+      <span class="viewer-count" id="viewer-count" aria-live="polite"></span>
+      <label class="viewer-quality" id="viewer-quality-box" hidden>
+        清晰度
+        <select id="viewer-quality" aria-label="视频清晰度"></select>
+      </label>
+      <span class="viewer-zoom-hint" id="viewer-zoom-hint" hidden>滚轮或双击缩放，放大后可拖动</span>
+      <button class="btn" type="button" id="viewer-open-x">在 X 打开</button>
+      <button class="btn viewer-close" type="button" id="viewer-close" aria-label="关闭">✕</button>
+    </div>
+    <div class="viewer-stage" id="viewer-stage"></div>
+    <p class="viewer-error" id="viewer-error" role="alert" hidden></p>
+    <button class="viewer-nav prev" type="button" id="viewer-prev" aria-label="上一个">‹</button>
+    <button class="viewer-nav next" type="button" id="viewer-next" aria-label="下一个">›</button>
   </dialog>
 
   <script src="app.js"></script>

@@ -60,6 +60,30 @@ function isSamePost(a, b) {
   return Boolean(id(a)) && id(a) === id(b);
 }
 
+const TWIMG_IMAGE = /^https:\/\/pbs\.twimg\.com\//;
+// X 的视频放在 video.twimg.com 和 video-s.twimg.com 两个域名上
+const TWIMG_VIDEO = /^https:\/\/video(-s)?\.twimg\.com\//;
+
+// 大图地址：pbs.twimg.com 的图片用 name=large 取较大尺寸
+function largeImage(url) {
+  if (!TWIMG_IMAGE.test(url)) return '';
+  return url.includes('?') ? url : `${url}?name=large`;
+}
+
+// 视频可播放的 mp4 地址，按码率从低到高；只要 video.twimg.com 上的，HLS（m3u8）不用
+function videoSources(m) {
+  const variants = (m.video_info && m.video_info.variants) || [];
+  return variants
+    .filter((v) => v.content_type === 'video/mp4' && TWIMG_VIDEO.test(v.url || ''))
+    .map((v) => {
+      // 清晰度按短边算，竖屏 720x1280 也显示 720p
+      const size = /\/(\d+)x(\d+)\//.exec(v.url);
+      const short = size ? Math.min(Number(size[1]), Number(size[2])) : 0;
+      return { url: v.url, bitrate: Number(v.bitrate) || 0, label: short ? `${short}p` : '' };
+    })
+    .sort((a, b) => a.bitrate - b.bitrate);
+}
+
 function mediaOf(t) {
   const list = (t.extendedEntities && t.extendedEntities.media) || [];
   return list.slice(0, 4).map((m) => {
@@ -67,15 +91,17 @@ function mediaOf(t) {
     const size = m.original_info || {};
     return {
       type: isVideo ? (m.type === 'animated_gif' ? 'gif' : 'video') : 'photo',
-      // 预览图统一用 pbs.twimg.com，不在应用里直接播视频（点开去 X 看）
       thumb: m.media_url_https || '',
+      // 应用内查看用：图片的大图、视频的 mp4（直接从 X 的服务器加载，不经过 twitterapi.io）
+      full: largeImage(m.media_url_https || ''),
+      sources: isVideo ? videoSources(m) : [],
       alt: m.ext_alt_text || '',
       width: size.width || 0,
       height: size.height || 0,
       duration: isVideo && m.video_info ? Math.round((m.video_info.duration_millis || 0) / 1000) : 0,
       url: X_URL.test(m.expanded_url || '') ? m.expanded_url : t.url,
     };
-  }).filter((m) => /^https:\/\/pbs\.twimg\.com\//.test(m.thumb));
+  }).filter((m) => TWIMG_IMAGE.test(m.thumb));
 }
 
 // 链接预览卡片（文章、网页）

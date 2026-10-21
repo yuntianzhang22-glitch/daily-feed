@@ -164,6 +164,56 @@ nav { flex: 1; overflow-y: auto; }
   background: rgba(0, 0, 0, .7); color: #fff; font-size: 12px; font-weight: 600;
 }
 
+.media-item video { display: block; width: 100%; height: 100%; object-fit: cover; }
+.media-grid.n1 .media-item video { height: auto; max-height: 420px; object-fit: contain; }
+
+/* 应用内查看器（全屏） */
+dialog.viewer {
+  width: 100vw; height: 100vh; max-width: none; max-height: none; margin: 0; padding: 0;
+  border: 0; border-radius: 0; overflow: hidden; background: rgba(0, 0, 0, .94); color: #fff;
+}
+dialog.viewer[open] { display: grid; grid-template-rows: auto 1fr; }
+dialog.viewer::backdrop { background: rgba(0, 0, 0, .6); }
+.viewer-bar {
+  display: flex; align-items: center; gap: 10px; padding: 32px 20px 10px;
+  position: relative; z-index: 2;
+}
+.viewer-count { flex: 1; font-size: 14px; color: #ccc; font-variant-numeric: tabular-nums; }
+.viewer-zoom-hint { font-size: 12px; color: #999; }
+.viewer-quality { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #ccc; white-space: nowrap; }
+.viewer-quality[hidden], .viewer-zoom-hint[hidden] { display: none; }
+.viewer-quality select {
+  padding: 4px 8px; border-radius: 8px; border: 1px solid #444; background: #111; color: #fff;
+}
+.viewer .btn { border-color: #444; color: #fff; }
+.viewer .btn:hover { background: #222; }
+.viewer-close { width: 36px; padding: 6px 0; }
+.viewer-stage {
+  position: relative; display: grid; place-items: center; overflow: hidden; min-height: 0;
+  padding: 0 72px 32px;
+}
+/* 用视口高度限制，竖屏视频不会超出窗口、底部的播放控件也能看到 */
+.viewer-img {
+  max-width: 100%; max-height: calc(100vh - 120px); object-fit: contain; user-select: none;
+  cursor: zoom-in; transform-origin: center; touch-action: none;
+}
+.viewer-img.zoomed { cursor: grab; }
+.viewer-img.zoomed:active { cursor: grabbing; }
+.viewer-video { max-width: 100%; max-height: calc(100vh - 120px); background: #000; border-radius: 8px; }
+.viewer-error {
+  position: absolute; left: 50%; bottom: 40px; transform: translateX(-50%); z-index: 2;
+  margin: 0; padding: 10px 16px; border-radius: 10px; background: rgba(244, 33, 46, .9); color: #fff; font-size: 14px;
+}
+.viewer-nav {
+  position: absolute; top: 50%; z-index: 2; width: 48px; height: 48px; margin-top: -24px;
+  border: 0; border-radius: 50%; background: rgba(255, 255, 255, .12); color: #fff;
+  font-size: 30px; line-height: 1; cursor: pointer;
+}
+.viewer-nav:hover { background: rgba(255, 255, 255, .24); }
+.viewer-nav.prev { left: 14px; }
+.viewer-nav.next { right: 14px; }
+.viewer-nav[hidden] { display: none; }
+
 /* 链接卡片 */
 .link-card {
   display: flex; width: 100%; max-width: 520px; margin: 4px 0 10px; padding: 0; text-align: left;

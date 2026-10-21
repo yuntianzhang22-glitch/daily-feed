@@ -170,18 +170,193 @@ function formatDuration(sec) {
   return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
 }
 
+const TWVIDEO = /^https:\/\/video(-s)?\.twimg\.com\//;
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+// GIF（X 上其实是静音循环的短视频）在列表里滚动到可见时才加载并播放，滚出去就暂停
+const gifObserver = new IntersectionObserver((entries) => {
+  for (const { target: v, isIntersecting } of entries) {
+    if (isIntersecting) {
+      if (!v.src) v.src = v.dataset.src;
+      v.play().catch(() => {});
+    } else {
+      v.pause();
+    }
+  }
+}, { rootMargin: '200px' });
+
 function renderMedia(media, postUrl) {
   if (!media || !media.length) return null;
-  const grid = el('div', { class: `media-grid n${Math.min(media.length, 4)}` });
-  for (const m of media) {
-    if (!TWIMG.test(m.thumb)) continue;
-    const label = m.type === 'photo' ? (m.alt || '图片，点击在 X 查看') : `${m.type === 'gif' ? 'GIF' : '视频'}，点击在 X 播放`;
-    const img = el('img', { src: m.thumb + (m.thumb.includes('?') ? '' : '?name=small'), alt: m.alt || '', loading: 'lazy', referrerpolicy: 'no-referrer' });
+  const items = media.filter((m) => TWIMG.test(m.thumb));
+  if (!items.length) return null;
+  const grid = el('div', { class: `media-grid n${Math.min(items.length, 4)}` });
+  items.forEach((m, i) => {
+    const label = m.type === 'photo' ? `查看大图${m.alt ? `：${m.alt}` : ''}` : `播放${m.type === 'gif' ? ' GIF' : '视频'}`;
+    const thumb = m.thumb + (m.thumb.includes('?') ? '' : '?name=small');
+    let visual;
+    const gifSrc = m.type === 'gif' && m.sources && m.sources.length && TWVIDEO.test(m.sources[0].url) ? m.sources[0].url : '';
+    if (gifSrc && !reducedMotion.matches) {
+      visual = el('video', { poster: thumb, 'data-src': gifSrc, playsinline: true, loop: true, preload: 'none', 'aria-hidden': 'true' });
+      visual.muted = true;
+      gifObserver.observe(visual);
+    } else {
+      visual = el('img', { src: thumb, alt: m.alt || '', loading: 'lazy', referrerpolicy: 'no-referrer' });
+    }
     const overlay = m.type === 'photo' ? null
       : el('span', { class: 'play', 'aria-hidden': 'true', text: m.type === 'gif' ? 'GIF' : `▶ ${formatDuration(m.duration)}` });
-    grid.append(linkButton('media-item', m.url || postUrl, label, img, overlay));
+    grid.append(el('button', {
+      class: 'media-item', type: 'button', 'aria-label': label,
+      onclick: (e) => { e.stopPropagation(); openViewer(items, i, postUrl); },
+    }, visual, overlay));
+  });
+  return grid;
+}
+
+// ---- 应用内查看：图片放大（缩放、拖动）、视频播放（可切清晰度）
+// 文件直接从 X 的服务器（pbs / video.twimg.com）加载，不经过 twitterapi.io，不产生 API 费用
+
+const viewer = { items: [], index: 0, postUrl: '', scale: 1, x: 0, y: 0, drag: null };
+
+// 默认清晰度：不超过约 2.5 Mbps 里最清楚的一档，太慢太大的不默认用
+function defaultSource(sources) {
+  const ok = sources.filter((s) => s.bitrate && s.bitrate <= 2600000);
+  return ok.length ? ok[ok.length - 1] : sources[0];
+}
+
+function openViewer(items, index, postUrl) {
+  viewer.items = items;
+  viewer.postUrl = postUrl;
+  const multi = items.length > 1;
+  $('viewer-prev').hidden = !multi;
+  $('viewer-next').hidden = !multi;
+  if (!$('viewer').open) $('viewer').showModal();
+  showViewerItem(index);
+}
+
+function stopViewerMedia() {
+  // 关掉或切换时停止下载，不在后台继续耗流量
+  for (const v of $('viewer-stage').querySelectorAll('video')) {
+    v.pause();
+    v.removeAttribute('src');
+    v.load();
   }
-  return grid.childElementCount ? grid : null;
+  $('viewer-stage').replaceChildren();
+}
+
+function viewerError(text) {
+  const p = $('viewer-error');
+  p.textContent = text;
+  p.hidden = false;
+}
+
+function applyZoom(img) {
+  img.style.transform = `translate(${viewer.x}px, ${viewer.y}px) scale(${viewer.scale})`;
+  img.classList.toggle('zoomed', viewer.scale > 1);
+}
+
+function setZoom(img, scale) {
+  viewer.scale = Math.max(1, Math.min(5, scale));
+  if (viewer.scale === 1) { viewer.x = 0; viewer.y = 0; }
+  applyZoom(img);
+}
+
+function showViewerItem(index) {
+  const n = viewer.items.length;
+  viewer.index = (index + n) % n;
+  viewer.scale = 1; viewer.x = 0; viewer.y = 0;
+  const m = viewer.items[viewer.index];
+  stopViewerMedia();
+  $('viewer-error').hidden = true;
+  $('viewer-count').textContent = n > 1 ? `${viewer.index + 1} / ${n}` : '';
+  $('viewer-quality-box').hidden = true;
+  $('viewer-zoom-hint').hidden = m.type !== 'photo';
+  const stage = $('viewer-stage');
+
+  if (m.type === 'photo') {
+    const src = TWIMG.test(m.full || '') ? m.full : m.thumb;
+    const img = el('img', { class: 'viewer-img', src, alt: m.alt || '', referrerpolicy: 'no-referrer', draggable: 'false' });
+    img.addEventListener('error', () => viewerError('图片加载失败。可能需要开启代理，或者点右上角「在 X 打开」。'));
+    img.addEventListener('dblclick', () => setZoom(img, viewer.scale > 1 ? 1 : 2.5));
+    img.addEventListener('pointerdown', (e) => {
+      if (viewer.scale <= 1) return;
+      viewer.drag = { px: e.clientX, py: e.clientY, x: viewer.x, y: viewer.y };
+      img.setPointerCapture(e.pointerId);
+    });
+    img.addEventListener('pointermove', (e) => {
+      if (!viewer.drag) return;
+      viewer.x = viewer.drag.x + e.clientX - viewer.drag.px;
+      viewer.y = viewer.drag.y + e.clientY - viewer.drag.py;
+      applyZoom(img);
+    });
+    img.addEventListener('pointerup', () => { viewer.drag = null; });
+    stage.append(img);
+    return;
+  }
+
+  const sources = (m.sources || []).filter((s) => TWVIDEO.test(s.url));
+  if (!sources.length) {
+    stage.append(el('img', { class: 'viewer-img', src: m.full || m.thumb, alt: '', referrerpolicy: 'no-referrer' }));
+    viewerError('这个视频没有可直接播放的地址，请点右上角「在 X 打开」。');
+    return;
+  }
+  const isGif = m.type === 'gif';
+  const start = defaultSource(sources);
+  const video = el('video', { class: 'viewer-video', poster: m.full || m.thumb, playsinline: true, preload: 'auto' });
+  video.controls = true;
+  video.autoplay = true;
+  if (isGif) { video.loop = true; video.muted = true; }
+  video.src = start.url;
+  video.addEventListener('error', () => {
+    if (video.getAttribute('src')) viewerError('视频加载失败，可能已被删除或需要开启代理。可以点右上角「在 X 打开」。');
+  });
+  stage.append(video);
+
+  // GIF 只有一档；视频提供清晰度切换，切换时保留播放进度
+  if (!isGif && sources.length > 1) {
+    const sel = $('viewer-quality');
+    sel.replaceChildren(...sources.map((s, i) => el('option', {
+      value: String(i),
+      text: `${s.label || '未知'} · ${(s.bitrate / 1e6).toFixed(1).replace(/\.0$/, '')} Mbps`,
+    })));
+    sel.value = String(sources.indexOf(start));
+    sel.onchange = () => {
+      const t = video.currentTime;
+      const playing = !video.paused;
+      video.src = sources[Number(sel.value)].url;
+      video.addEventListener('loadedmetadata', () => {
+        video.currentTime = t;
+        if (playing) video.play().catch(() => {});
+      }, { once: true });
+    };
+    $('viewer-quality-box').hidden = false;
+  }
+}
+
+function initViewer() {
+  const dlg = $('viewer');
+  $('viewer-close').addEventListener('click', () => dlg.close());
+  $('viewer-prev').addEventListener('click', () => showViewerItem(viewer.index - 1));
+  $('viewer-next').addEventListener('click', () => showViewerItem(viewer.index + 1));
+  $('viewer-open-x').addEventListener('click', () => {
+    const m = viewer.items[viewer.index];
+    openLink((m && m.url) || viewer.postUrl);
+  });
+  dlg.addEventListener('close', stopViewerMedia);
+  // 点空白处关闭
+  $('viewer-stage').addEventListener('click', (e) => { if (e.target === e.currentTarget) dlg.close(); });
+  // 滚轮 / 触控板双指缩放图片
+  $('viewer-stage').addEventListener('wheel', (e) => {
+    const img = $('viewer-stage').querySelector('.viewer-img');
+    if (!img || viewer.items[viewer.index].type !== 'photo') return;
+    e.preventDefault();
+    setZoom(img, viewer.scale * Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.002)));
+  }, { passive: false });
+  // 左右键切换；焦点在视频或清晰度菜单上时左右键留给它们（快进 / 选项）
+  dlg.addEventListener('keydown', (e) => {
+    if (viewer.items.length < 2 || e.target.closest('video, select')) return;
+    if (e.key === 'ArrowLeft') { e.preventDefault(); showViewerItem(viewer.index - 1); }
+    if (e.key === 'ArrowRight') { e.preventDefault(); showViewerItem(viewer.index + 1); }
+  });
 }
 
 function renderCard(c) {
@@ -936,6 +1111,7 @@ $('cancel-settings').addEventListener('click', () => $('settings').close());
 ['max-per-target', 'search-mode', 'avg-posts', 'include-replies', 'keywords']
   .forEach((id) => $(id).addEventListener('input', updateEstimate));
 initSchedulePickers();
+initViewer();
 $('save-access').addEventListener('click', saveAccessCode);
 $('access-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); saveAccessCode(); } });
 $('save-api-key').addEventListener('click', saveApiKey);
