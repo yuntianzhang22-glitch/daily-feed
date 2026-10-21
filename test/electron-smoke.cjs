@@ -23,6 +23,7 @@ app.whenReady().then(async () => {
     };
     await ready();
     assert.equal(await run('document.getElementById("lab-panel").hidden'), false);
+    assert.equal(await run('document.getElementById("lab-copy-account").hidden'), false);
     assert.equal(app.getName(), 'Daily Feed Test');
     if (process.platform === 'darwin') assert.ok(process.execPath.includes('/Daily Feed Test.app/'));
     assert.equal(await run('document.querySelector(".brand").textContent'), 'Daily Feed Test');

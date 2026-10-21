@@ -47,6 +47,7 @@ async function initLab() {
   $('lab-role').value = labContext.role;
   for (const [value, label] of Object.entries(labContext.scenarios[labContext.role])) $('lab-scenario').append(el('option', { value, text: label }));
   $('lab-scenario').value = labContext.scenario;
+  $('lab-copy-account').hidden = false;
   $('lab-copy-account').addEventListener('click', async () => {
     try {
       await api.labCopyAccount();
