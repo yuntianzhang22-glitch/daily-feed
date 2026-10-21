@@ -736,7 +736,7 @@ async function renderAccess() {
     : '只需登录账号，无需密码或额外访问码。原访问码可直接作为登录账号使用；充值备注用的 DF- 短编号不能登录。';
   $('api-key-summary').textContent = info.mode === 'direct' ? '更换 API Key' : '使用本机 API Key 直连（可选）';
   if (ownApi) $('api-key-box').open = false;
-  $('key-hint').textContent = info.hasApiKey ? '已在本机加密保存' : '尚未设置';
+  $('key-hint').textContent = ownApi && info.mode === 'relay' ? '当前使用云端 API，本机 Key 可选' : info.hasApiKey ? '已在本机加密保存' : '尚未设置';
   updateEstimate();
   if (ownApi) {
     setHint('access-hint', info.hasAccount
