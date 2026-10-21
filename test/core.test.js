@@ -246,6 +246,30 @@ test('抓取：5xx 重试后成功，额度用尽不重试', async () => {
   assert.strictEqual(m, 1);
 });
 
+test('中转错误不展示供应商诊断或其他身份，保留当前账号的额度与余额提示', async () => {
+  for (const [status, body, expected] of [
+    [401, { code: 'invalid_code' }, /登录账号无效.*联系支持/],
+    [429, { code: 'quota_exceeded' }, /本月抓取额度已用完/],
+    [402, { code: 'balance_empty', account_no: 'DF-7K3QX' }, /余额不足，请充值（转账时备注账号 DF-7K3QX）/],
+    [402, { code: 'upstream', message: 'API 余额不足，联系管理员充值' }, /服务暂时不可用/],
+    [502, { code: 'upstream', message: 'twitterapi provider error' }, /服务暂时不可用/],
+    [500, { code: 'internal', message: 'owner beta paid internal details' }, /请求失败（500）/],
+    [400, { code: 'bad_query', message: '当前身份不支持此搜索内容' }, /请求失败（400）/],
+  ]) {
+    const client = new FeedClient({ mode: 'relay', relayUrl: 'https://r', accessCode: 'c',
+      fetchImpl: fakeFetch([], { status, body }), maxRetries: 0 });
+    await assert.rejects(client.searchPage('from:a', 'Top', ''), (error) => {
+      assert.match(error.message, expected);
+      assert.doesNotMatch(error.message, /管理员|超管|内测|付费用户|API|twitterapi|owner|beta|paid|当前身份/i);
+      if (body.code !== 'balance_empty') assert.doesNotMatch(error.message, /充值/);
+      return true;
+    });
+  }
+  const direct = new FeedClient({ mode: 'direct', apiKey: 'k', maxRetries: 0,
+    fetchImpl: fakeFetch([], { status: 402, body: { message: 'insufficient' } }) });
+  await assert.rejects(direct.searchPage('from:a', 'Top', ''), /API 余额不足/);
+});
+
 test('费用估算：按每周抓取日计算，间隔不均匀时分别计算', () => {
   const twelve = Array.from({ length: 12 }, (_, i) => `u${i}`);
   const W = 30 / 7;

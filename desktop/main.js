@@ -458,7 +458,7 @@ ipcMain.handle('set-access-code', async (_e, code) => {
   if (fetching) throw new Error('请等待当前抓取完成后再登录或退出');
   code = String(code || '').trim();
   if (!code) { writeAccess(null); limits = {}; schedule(); return { ok: true }; }
-  if (!APP_CONFIG.relayUrl) throw new Error('这个版本没有配置中转服务');
+  if (!APP_CONFIG.relayUrl) throw new Error('账号服务暂不可用，请联系支持');
   // 先验证再保存
   const client = new FeedClient({ mode: 'relay', relayUrl: APP_CONFIG.relayUrl, accessCode: code, fetchImpl: netFetch });
   const accessFile = P.access();

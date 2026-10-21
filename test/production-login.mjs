@@ -36,6 +36,8 @@ try {
     let labClosed = false;
     try {
       const code = profiles.localCode(serverEnvironment, role, 'normal');
+      // 使用不含身份名称的展示名，检查应用自身文案，而非样例账号的命名。
+      lab.ledger.update(lab.accounts[`${role}:normal`], { name: '验收账号' });
       const account = lab.ledger.status(lab.accounts[`${role}:normal`]);
       const deviceA = `${role}-device-a`, deviceB = `${role}-device-b`;
       await device(lab, environment, code, account, 'first', deviceA, 30);

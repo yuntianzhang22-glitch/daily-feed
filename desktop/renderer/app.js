@@ -733,8 +733,10 @@ async function renderAccess() {
   $('account-help').textContent = ownApi
     ? '完整超管登录账号可在其他设备登录；新电脑使用云端 API，无需复制本机 API Key。本机内容暂不跨设备同步。'
     : info.mode === 'relay'
-    ? '登录状态已保存在本机。复制完整登录账号，在其他设备输入一次即可登录。登录账号请私下保管；DF- 开头的短编号仅用于充值备注。本机的关注、收藏和阅读记录暂不同步。'
-    : '只需登录账号，无需密码或额外访问码。原访问码可直接作为登录账号使用；充值备注用的 DF- 短编号不能登录。';
+    ? '登录状态已保存在本机。复制完整登录账号，在其他设备输入一次即可登录。登录账号请私下保管。' +
+      (identity.permissions.viewBalance ? 'DF- 开头的短编号仅用于充值备注。' : '') +
+      '本机的关注、收藏和阅读记录暂不同步。'
+    : '只需输入完整登录账号，无需密码；下次打开自动登录。登录账号请私下保管。';
   $('api-key-summary').textContent = info.mode === 'direct' ? '更换 API Key' : '使用本机 API Key 直连（可选）';
   if (ownApi) $('api-key-box').open = false;
   $('key-hint').textContent = ownApi && info.mode === 'relay' ? '当前使用云端 API，本机 Key 可选' : info.hasApiKey ? '已在本机加密保存' : '尚未设置';
@@ -747,7 +749,7 @@ async function renderAccess() {
     return;
   }
   if (!info.relayConfigured) {
-    setHint('access-hint', '尚未配置账号服务，请联系管理员。', 'warn');
+    setHint('access-hint', '账号服务暂不可用，请联系支持。', 'warn');
     return;
   }
   const maxDays = accessLimits.max_runs_per_week;
@@ -763,10 +765,10 @@ async function renderAccess() {
   } else if (info.mode === 'relay') {
     const q = identity.permissions.viewMonthlyQuota ? info.quota || {} : {};
     setHint('access-hint',
-      `已登录（${info.name || '已验证'}${info.account_no ? `，编号 ${info.account_no}` : ''}，内测）。本月额度已用 ${usd(q.used_usd)} / ${usd(q.limit_usd)}` +
+      `已登录（${info.name || '已验证'}${info.account_no ? `，编号 ${info.account_no}` : ''}）。本月额度已用 ${usd(q.used_usd)} / ${usd(q.limit_usd)}` +
       (maxDays && maxDays < 7 ? `，每周最多抓 ${maxDays} 天` : '') + '。', 'ok');
   } else {
-    setHint('access-hint', '向管理员领取登录账号，粘贴后即可登录；下次打开自动沿用。', 'warn');
+    setHint('access-hint', '粘贴你的完整登录账号即可登录；下次打开自动沿用。', 'warn');
   }
 }
 
@@ -1034,7 +1036,7 @@ function renderRoster() {
   const matches = roster.people.filter((p) => (rosterCat === 'all' || p.category === rosterCat) &&
     (!q || [p.username, p.name, p.bio].some((s) => lower(s).includes(q))));
   if (!matches.length) {
-    list.append(el('li', { class: 'empty-row', text: '名单里没有匹配的人。需要加新的人请联系管理员。' }));
+    list.append(el('li', { class: 'empty-row', text: '名单里没有匹配的人。需要添加新的人可联系支持。' }));
   }
   for (const p of matches) {
     const id = `pick-${p.username}`;

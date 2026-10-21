@@ -51,7 +51,7 @@ class FeedClient {
         res = await this.fetch(url, { ...init, signal: AbortSignal.timeout(30000) });
       } catch (e) {
         if (attempt < this.maxRetries) { await this.sleep(2000 * 2 ** attempt); continue; }
-        throw new ApiError(`网络错误：${e.cause?.code || e.message}`, 0, 'network');
+        throw new ApiError(this.mode === 'relay' ? '网络连接失败，请检查网络后重试' : `网络错误：${e.cause?.code || e.message}`, 0, 'network');
       }
       // 429 限流和 5xx 重试；中转的额度用尽 (429 + quota_exceeded) 不重试
       const text = await res.text();
@@ -62,7 +62,7 @@ class FeedClient {
       const retryable = (res.status === 429 && code !== 'quota_exceeded') || res.status >= 500;
       if (retryable && attempt < this.maxRetries) { await this.sleep(2000 * 2 ** attempt); continue; }
       const msg = (body && (body.message || body.error || body.msg)) || text.slice(0, 200) || res.statusText;
-      throw new ApiError(friendly(res.status, code, msg, body), res.status, code);
+      throw new ApiError(friendly(res.status, code, msg, body, this.mode), res.status, code);
     }
   }
 
@@ -111,15 +111,18 @@ class FeedClient {
   }
 }
 
-function friendly(status, code, msg, body) {
-  if (code === 'invalid_code' || status === 401) return '登录账号无效或已停用，请联系管理员';
+function friendly(status, code, msg, body, mode) {
+  // 中转服务的供应商故障不能被误报为用户余额不足，也不向用户透出内部诊断文案。
+  if (code === 'upstream') return '服务暂时不可用，请稍后重试或联系支持';
+  if (code === 'invalid_code' || status === 401) return mode === 'direct' ? 'API Key 无效或已停用' : '登录账号无效或已停用，请联系支持';
   if (code === 'quota_exceeded') return '本月抓取额度已用完，下个月自动恢复';
   if (code === 'balance_empty') {
     const no = body && body.account_no;
     return `余额不足，请充值${no ? `（转账时备注账号 ${no}）` : ''}`;
   }
   if (code === 'too_frequent') return '抓取太频繁，请稍后再试';
-  if (status === 402) return 'API 余额不足，请联系管理员充值';
+  if (mode === 'relay') return `请求失败（${status || '网络'}），请稍后重试或联系支持`;
+  if (status === 402) return 'API 余额不足，请为自己的 API 账户充值';
   return `请求失败（${status || '网络'}）：${msg}`;
 }
 
