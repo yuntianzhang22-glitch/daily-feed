@@ -21,6 +21,8 @@ npm run relay:admin:staging -- list
 | 命令 | 用途 |
 | --- | --- |
 | `add "名字" [每月美元额度=3]` | 免费内测，按实际 API 成本计入每月额度 |
+| `provision-owner [名字]` | 幂等创建独立超管；私密凭证保存在 `.local/owner-account.json`，不输出明文 |
+| `backup-accounts` | 升级前只读备份当前账号列表到 `.local/` |
 | `add-paid "名字"` | 付费用户，初始零余额 |
 | `topup <账号> <人民币金额> [备注]` | 收到转账后记账；负数用于退款或冲正 |
 | `list` / `show <账号>` | 查看账号、余额、充值记录、月度用量 |
@@ -57,3 +59,19 @@ npm run relay:deploy:production
 ```
 
 正式 `TWITTERAPI_KEY`、`ADMIN_TOKEN` 不能写在配置文件、源码或发布包中。
+
+## 独立超管账号
+
+```bash
+npm run relay:admin:production -- provision-owner "我的超管"
+# 退出本机正式应用后，验证并登录刚创建的账号：
+npm run owner:setup
+```
+
+该命令先保存随机凭证再向受 `ADMIN_TOKEN` 保护的 `/admin/owner` 提交，网络失败可原样重试，不会重复开户。后台只保存哈希。
+超管登录账号不具备 Cloudflare 或 `/admin/*` 的管理口令权限。账号状态由服务端返回，普通账号不能提交 `role`/`plan` 自行升级。
+超管可使用云端关键词搜索，无用户充值或月额度要求；仍记录实际 API 用量，供应商 API 会产生正常费用。
+`.local/owner-account.json` 是私密凭证，不进 GitHub、安装包或开发包。新电脑只需安装 0.9.0 及以上版本，粘贴从现有应用复制的登录账号。
+预发使用 `relay:admin:staging`，凭证另存 `.local/staging-owner-account.json`，不能混用。
+
+从旧 KV 服务首次升级时，先 `backup-accounts`，部署后运行 `migrate`，逐项核对旧账号的哈希、名字、月额度、限制、停用状态和用量，再创建独立超管。重复迁移不覆盖已有账本账号。

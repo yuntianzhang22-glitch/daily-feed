@@ -27,17 +27,21 @@ app.whenReady().then(async () => {
     if (process.platform === 'darwin') assert.ok(process.execPath.includes('/Daily Feed Test.app/'));
     assert.equal(await run('document.querySelector(".brand").textContent'), 'Daily Feed Test');
     assert.equal((await run('api.labInfo()')).role, 'owner');
-    assert.equal((await run('api.accessInfo()')).mode, 'direct');
+    assert.equal((await run('api.accessInfo()')).mode, 'relay');
     assert.ok((await run('api.counts()')).total > 0);
     await run('openSettings().then(() => renderAccess())');
-    assert.equal(await run('document.getElementById("access-title").textContent'), 'API 连接');
+    assert.equal(await run('document.getElementById("access-title").textContent'), '账号登录');
     assert.equal(await run('getComputedStyle(document.getElementById("access-code-row")).display'), 'none');
     assert.notEqual(await run('getComputedStyle(document.getElementById("api-key-box")).display'), 'none');
     assert.equal((await run('api.accessInfo()')).permissions.configureApi, true);
     assert.equal(await run('document.getElementById("api-key").disabled'), false);
     await run(`api.setApiKey(${JSON.stringify(process.env.DAILY_FEED_LAB_KEY)})`);
-    await denied('api.setAccessCode("df_do_not_overwrite_owner")');
-    await denied('api.copyLoginAccount()');
+    await assert.rejects(run('api.setAccessCode("df_do_not_overwrite_owner")'), /无效/);
+    await run('api.copyLoginAccount()');
+    assert.equal(copiedAccount, localCode('test', 'owner', 'normal'));
+    assert.equal((await run('api.accessInfo()')).mode, 'direct');
+    await run('api.useCloudApi()');
+    assert.equal((await run('api.accessInfo()')).mode, 'relay');
     assert.doesNotMatch(await run('document.getElementById("access-hint").textContent'), /内测|月额度|充值|访问码/);
     await run('document.getElementById("settings").close()');
     for (const [role, scenario, expected] of [

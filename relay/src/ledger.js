@@ -1,7 +1,7 @@
 // 账本：访问码、用量、余额、充值记录。
 // 运行在一个 Durable Object（SQLite）里，所有请求串行处理，充值和扣费不会互相覆盖。
 //
-// 两种账号：
+// 三种账号：owner（超管）不充值、不受用户月额度限制；其余两种：
 //   beta（内测）：每月额度，按实际成本扣，每月重置，不花钱
 //   paid（付费）：余额制，充多少用多少，不重置。加价已经算在「每元对应多少 credits」里，
 //                所以扣费仍按实际成本扣 credits，余额换算成人民币显示
@@ -24,7 +24,7 @@ const SCHEMA = [
      id TEXT PRIMARY KEY,               -- 访问码的 SHA-256，原始访问码不保存
      account_no TEXT NOT NULL UNIQUE,   -- 给用户看的账号，如 DF-7K3QX，充值时备注
      name TEXT NOT NULL,
-     plan TEXT NOT NULL,                -- beta | paid
+     plan TEXT NOT NULL,                -- owner | beta | paid
      monthly_credits INTEGER,           -- 仅 beta
      limits TEXT NOT NULL,
      disabled INTEGER NOT NULL DEFAULT 0,
@@ -120,8 +120,8 @@ export class Ledger {
     if (!/^[0-9a-f]{64}$/.test(id || '')) throw new Error('无效的 id');
     name = String(name || '').trim().slice(0, 60);
     if (!name) throw new Error('需要名字');
-    if (!['beta', 'paid'].includes(plan)) throw new Error('plan 只能是 beta 或 paid');
-    const lim = { ...DEFAULT_LIMITS, ...cleanLimits(limits) };
+    if (!['owner', 'beta', 'paid'].includes(plan)) throw new Error('用户身份无效');
+    const lim = plan === 'owner' ? {} : { ...DEFAULT_LIMITS, ...cleanLimits(limits) };
     const no = this.newAccountNo();
     this.sql.exec(
       'INSERT INTO accounts (id, account_no, name, plan, monthly_credits, limits, created) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -131,6 +131,16 @@ export class Ledger {
     return this.view(this.mustFind(id));
   }
 
+  // 仅管理口令保护的创建接口可调用；同一凭证重试不会重复开户或覆盖已有账号。
+  createOwner({ id, name = '我的超管' } = {}) {
+    const existing = this.find(id);
+    if (existing) {
+      if (existing.plan !== 'owner') throw new Error('已有用户不能通过创建超管接口升级');
+      return this.view(existing);
+    }
+    return this.create({ id, name, plan: 'owner' });
+  }
+
   // 把旧版（存在 KV 里的）访问码搬进账本，保留本月用量
   importBeta({ id, user, usage }) {
     if (this.find(id)) return this.view(this.find(id));
@@ -138,7 +148,8 @@ export class Ledger {
     const no = this.newAccountNo();
     this.sql.exec(
       'INSERT INTO accounts (id, account_no, name, plan, monthly_credits, limits, disabled, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      id, no, String(u.name || '未命名').slice(0, 60), 'beta', Number(u.monthly_credits) || DEFAULT_MONTHLY_CREDITS,
+      id, no, String(u.name || '未命名').slice(0, 60), 'beta',
+      u.monthly_credits != null && Number.isFinite(Number(u.monthly_credits)) ? Math.max(0, Number(u.monthly_credits)) : DEFAULT_MONTHLY_CREDITS,
       JSON.stringify({ ...DEFAULT_LIMITS, ...cleanLimits(u.limits) }), u.disabled ? 1 : 0, u.created || new Date(this.now()).toISOString(),
     );
     if (usage && (usage.credits || usage.requests)) {
@@ -158,6 +169,7 @@ export class Ledger {
       this.sql.exec('UPDATE accounts SET limits = ? WHERE id = ?', JSON.stringify(lim), a.id);
     }
     if ('plan' in patch) {
+      if (a.plan === 'owner') throw new Error('超管账号不能切换为用户套餐');
       if (!['beta', 'paid'].includes(patch.plan)) throw new Error('plan 只能是 beta 或 paid');
       // 改成内测时补上默认月额度
       this.sql.exec('UPDATE accounts SET plan = ?, monthly_credits = COALESCE(monthly_credits, ?) WHERE id = ?',
@@ -253,6 +265,7 @@ export class Ledger {
 
   topup(ref, cny, note = '') {
     const a = this.mustFind(ref);
+    if (a.plan === 'owner') throw new Error('超管账号无需充值');
     if (a.plan !== 'paid') throw new Error(`${a.name}（${a.account_no}）是内测账号，不用充值。要改成付费请先运行 plan ${a.account_no} paid`);
     cny = Number(cny);
     if (!Number.isFinite(cny) || cny === 0 || Math.abs(cny) > 100000) throw new Error('金额无效');
@@ -292,5 +305,5 @@ function cleanLimits(l) {
 
 // 允许通过 Durable Object 调用的方法
 export const LEDGER_METHODS = new Set([
-  'price', 'setPrice', 'create', 'importBeta', 'update', 'status', 'authorize', 'charge', 'topup', 'list', 'history',
+  'price', 'setPrice', 'create', 'createOwner', 'importBeta', 'update', 'status', 'authorize', 'charge', 'topup', 'list', 'history',
 ]);

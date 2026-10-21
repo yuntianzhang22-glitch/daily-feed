@@ -12,7 +12,7 @@ const { runOnce, estimateMonthlyCost, cleanUsernames } = require('./core/fetcher
 const { Updater } = require('./core/updater');
 const { nextSlot, prevSlot } = require('./core/schedule');
 const { LAB_APP_NAME, resolveEnvironment, ROLES, SCENARIOS, validateProfile, profilePath, localCode } = require('./core/environment');
-const { identityFor, requirePermission, verifiedMemberRole, visibleSettings, applySettings, fetchSettings } = require('./core/permissions');
+const { identityFor, requirePermission, verifiedAccountRole, visibleSettings, applySettings, fetchSettings } = require('./core/permissions');
 
 // 构建时写入的服务地址（中转、更新清单、名单）。开发时可以用环境变量覆盖。
 const APP_CONFIG = (() => {
@@ -48,6 +48,7 @@ const P = {
   db: () => path.join(userData(), 'tweets.db'),
   config: () => path.join(userData(), 'config.json'),
   access: () => path.join(userData(), 'access.json'),
+  signedOut: () => path.join(userData(), 'signed_out'),
   apiKey: () => path.join(userData(), 'api_key.bin'),
   lastAuto: () => path.join(userData(), 'last_auto_fetch.txt'),
   rosterCache: () => path.join(userData(), 'roster-cache.json'),
@@ -107,13 +108,8 @@ function seedLabLogin(reset = false) {
   const marker = path.join(userData(), 'lab-login-initialized');
   if (!reset && fs.existsSync(marker)) return;
   if (reset || (!fs.existsSync(P.access()) && !fs.existsSync(P.apiKey()))) {
-    if (APP_CONFIG.role === 'owner') {
-      writeAccess(null);
-      writeApiKey(process.env.DAILY_FEED_LAB_KEY);
-    } else {
-      writeApiKey(null);
-      writeAccess(localCode(APP_CONFIG.name, APP_CONFIG.role, APP_CONFIG.scenario), APP_CONFIG.role);
-    }
+    writeApiKey(null);
+    writeAccess(localCode(APP_CONFIG.name, APP_CONFIG.role, APP_CONFIG.scenario), APP_CONFIG.role, { accountLogin: true });
   }
   fs.writeFileSync(marker, '1', { mode: 0o600 });
 }
@@ -125,9 +121,15 @@ function readAccess() {
 }
 
 // 访问码本身可随时停用，存普通文件即可，避免每次更新后钥匙串弹窗
-function writeAccess(code, plan) {
-  if (!code) { fs.rmSync(P.access(), { force: true }); return; }
-  fs.writeFileSync(P.access(), JSON.stringify({ code, ...(plan ? { plan: verifiedMemberRole(plan) } : {}) }), { mode: 0o600 });
+function writeAccess(code, plan, { accountLogin = readAccess().accountLogin } = {}) {
+  if (!code) {
+    // 保留加密 Key，但明确退出，防止账号退出后自动回退为本机超管。
+    fs.writeFileSync(P.signedOut(), '1', { mode: 0o600 });
+    fs.rmSync(P.access(), { force: true });
+    return;
+  }
+  fs.writeFileSync(P.access(), JSON.stringify({ code, accountLogin: Boolean(accountLogin), ...(plan ? { plan: verifiedAccountRole(plan) } : {}) }), { mode: 0o600 });
+  fs.rmSync(P.signedOut(), { force: true });
 }
 
 function readApiKey() {
@@ -143,14 +145,23 @@ function writeApiKey(key) {
   if (!key) { fs.rmSync(P.apiKey(), { force: true }); return; }
   if (!safeStorage.isEncryptionAvailable()) throw new Error('系统加密不可用，无法安全保存 Key');
   fs.writeFileSync(P.apiKey(), safeStorage.encryptString(key), { mode: 0o600 });
+  fs.rmSync(P.signedOut(), { force: true });
 }
 
 // 自用 API Key 优先；只有访问码的内测/付费用户走中转。
 function accessMode() {
-  const access = resolveAccess({ apiKey: readApiKey(), relayUrl: APP_CONFIG.relayUrl, accessCode: readAccess().code });
+  if (fs.existsSync(P.signedOut())) return { mode: 'none' };
+  const saved = readAccess();
+  const access = resolveAccess({ apiKey: readApiKey(), relayUrl: APP_CONFIG.relayUrl, accessCode: saved.code, preferAccount: saved.accountLogin });
   // 只替换验收上游地址，账号与权限判断不因测试环境而改变。
   if (APP_CONFIG.lab && access.mode === 'direct') access.directBase = process.env.DAILY_FEED_LAB_DIRECT_BASE;
   return access;
+}
+
+function activeAccount() {
+  const mode = accessMode().mode;
+  const saved = readAccess();
+  return mode !== 'none' && saved.code && (mode === 'relay' || saved.plan === 'owner' || saved.accountLogin) ? saved : null;
 }
 
 function makeClient() {
@@ -160,23 +171,23 @@ function makeClient() {
 function currentRole() {
   if (accessMode().mode === 'direct') return 'owner';
   const access = readAccess();
-  return access.code && ['beta', 'paid'].includes(access.plan) ? access.plan : 'guest';
+  return accessMode().mode === 'relay' && access.code && ['owner', 'beta', 'paid'].includes(access.plan) ? access.plan : 'guest';
 }
 
 const authorize = (permission) => requirePermission(currentRole(), permission);
 const currentConfig = () => visibleSettings(config.load(), currentRole());
 
 async function refreshLimits() {
-  const m = accessMode();
+  const session = activeAccount();
   const accessFile = P.access();
-  if (m.mode !== 'relay') { limits = {}; return null; }
-  const client = makeClient();
+  if (!session) { limits = {}; return null; }
+  const client = new FeedClient({ mode: 'relay', relayUrl: APP_CONFIG.relayUrl, accessCode: session.code, fetchImpl: netFetch });
   const s = await client.status();
-  const plan = verifiedMemberRole(s.plan);
-  if (P.access() !== accessFile || accessMode().mode !== 'relay' || readAccess().code !== m.accessCode) {
+  const plan = verifiedAccountRole(s.plan);
+  if (P.access() !== accessFile || activeAccount()?.code !== session.code) {
     throw new Error('登录状态已变更，请重试');
   }
-  writeAccess(m.accessCode, plan);
+  writeAccess(session.code, plan);
   limits = s.limits || {};
   return s;
 }
@@ -378,7 +389,6 @@ function labInfo() {
 ipcMain.handle('lab-info', () => labInfo());
 ipcMain.handle('lab-copy-account', () => {
   if (!APP_CONFIG.lab) throw new Error('正式环境不开放验收控制');
-  if (APP_CONFIG.role === 'owner') throw new Error('超管样例使用 API Key');
   clipboard.writeText(localCode(APP_CONFIG.name, APP_CONFIG.role, APP_CONFIG.scenario));
   return { ok: true };
 });
@@ -429,8 +439,8 @@ ipcMain.handle('fetch-now', () => doFetch());
 ipcMain.handle('access-info', async () => {
   const m = accessMode();
   const info = { mode: m.mode, relayConfigured: Boolean(APP_CONFIG.relayUrl),
-    hasApiKey: m.mode === 'direct', limits };
-  if (m.mode === 'relay') {
+    hasApiKey: m.mode === 'direct', hasAccount: Boolean(activeAccount()), limits };
+  if (activeAccount()) {
     try {
       const s = await refreshLimits();
       Object.assign(info, { name: s.name, plan: s.plan || 'beta', account_no: s.account_no, quota: s.quota, balance: s.balance, limits });
@@ -455,7 +465,7 @@ ipcMain.handle('set-access-code', async (_e, code) => {
   const s = await client.status();
   if (P.access() !== accessFile) throw new Error('验收样例已切换，请重新登录');
   if (fetching) throw new Error('请等待当前抓取完成后再登录或退出');
-  writeAccess(code, verifiedMemberRole(s.plan));
+  writeAccess(code, verifiedAccountRole(s.plan), { accountLogin: true });
   limits = s.limits || {};
   // 立即按新的限制修正已有配置（比如最短间隔）
   config.save(config.load(), limits);
@@ -465,7 +475,7 @@ ipcMain.handle('set-access-code', async (_e, code) => {
 // 登录账号本身是私密凭证。只在用户主动复制时写入剪贴板，不传回页面或状态接口。
 ipcMain.handle('copy-login-account', () => {
   authorize('configureAccessCode');
-  const code = readAccess().code;
+  const code = activeAccount()?.code;
   if (!code) throw new Error('请先登录账号');
   clipboard.writeText(code);
   return { ok: true };
@@ -473,8 +483,21 @@ ipcMain.handle('copy-login-account', () => {
 ipcMain.handle('set-api-key', (_e, key) => {
   authorize('configureApi');
   writeApiKey(String(key || '').trim());
+  const saved = readAccess();
+  if (saved.code) writeAccess(saved.code, saved.plan, { accountLogin: !readApiKey() });
   if (readApiKey()) limits = {};
   schedule();
+});
+ipcMain.handle('use-cloud-api', async () => {
+  authorize('configureApi');
+  if (fetching) throw new Error('请等待当前抓取完成后再切换 API');
+  const status = await refreshLimits();
+  if (!status || status.plan !== 'owner') throw new Error('请先登录独立超管账号');
+  const saved = activeAccount();
+  writeAccess(saved.code, 'owner', { accountLogin: true });
+  limits = {};
+  schedule();
+  return { ok: true };
 });
 ipcMain.handle('status', () => ({ lastFetch, next: nextRun, version: app.getVersion() }));
 ipcMain.handle('check-update', () => checkForUpdate());

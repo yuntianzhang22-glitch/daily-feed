@@ -39,7 +39,7 @@ export async function startLab({ root, environment, port = 0, liveApiKey = '' })
     LEDGER: { idFromName: (n) => n, get: () => ({ call: async (method, args) => structuredClone(obj.call(method, args)) }) },
   };
   const accounts = {};
-  for (const role of ['beta', 'paid']) for (const scenario of Object.keys(profiles.SCENARIOS[role])) {
+  for (const role of ['owner', 'beta', 'paid']) for (const scenario of Object.keys(profiles.SCENARIOS[role])) {
     const code = profiles.localCode(environment, role, scenario);
     const id = crypto.createHash('sha256').update(code).digest('hex');
     let account = ledger.find(id);

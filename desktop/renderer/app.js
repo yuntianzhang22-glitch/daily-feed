@@ -21,9 +21,12 @@ function applyIdentity(info) {
   $('api-key').disabled = !p.configureApi;
   $('save-api-key').disabled = !p.configureApi;
   const member = p.configureAccessCode && info.relayConfigured;
-  $('access-code-row').hidden = !member || info.mode === 'relay';
-  $('account-actions').hidden = !member || info.mode !== 'relay';
-  $('account-help').hidden = !member;
+  $('access-code-row').hidden = !member || info.mode !== 'none';
+  $('account-actions').hidden = info.mode === 'none';
+  $('copy-account').hidden = !info.hasAccount;
+  $('login-owner-account').hidden = info.role !== 'owner' || info.hasAccount || !info.relayConfigured;
+  $('account-help').hidden = !member || (info.role === 'owner' && !info.hasAccount);
+  $('use-cloud-api').hidden = info.role !== 'owner' || !info.hasAccount || info.mode !== 'direct';
   if (labContext.enabled) $('lab-topup').hidden = info.role !== 'paid' || Boolean(info.error);
   $('keywords-box').hidden = !p.configureKeywords;
   $('keywords').disabled = !p.configureKeywords;
@@ -44,7 +47,6 @@ async function initLab() {
   $('lab-role').value = labContext.role;
   for (const [value, label] of Object.entries(labContext.scenarios[labContext.role])) $('lab-scenario').append(el('option', { value, text: label }));
   $('lab-scenario').value = labContext.scenario;
-  $('lab-copy-account').hidden = labContext.role === 'owner';
   $('lab-copy-account').addEventListener('click', async () => {
     try {
       await api.labCopyAccount();
@@ -726,16 +728,21 @@ async function renderAccess() {
   accessLimits = info.limits || {};
   applyIdentity(info);
   const ownApi = identity.role === 'owner';
-  $('access-title').textContent = ownApi ? 'API 连接' : '账号登录';
-  $('account-help').textContent = info.mode === 'relay'
+  $('access-title').textContent = info.mode === 'direct' ? 'API 连接' : '账号登录';
+  $('account-help').textContent = ownApi
+    ? '完整超管登录账号可在其他设备登录；新电脑使用云端 API，无需复制本机 API Key。本机内容暂不跨设备同步。'
+    : info.mode === 'relay'
     ? '登录状态已保存在本机。复制完整登录账号，在其他设备输入一次即可登录。登录账号请私下保管；DF- 开头的短编号仅用于充值备注。本机的关注、收藏和阅读记录暂不同步。'
     : '只需登录账号，无需密码或额外访问码。原访问码可直接作为登录账号使用；充值备注用的 DF- 短编号不能登录。';
-  $('api-key-summary').textContent = '更换 API Key';
+  $('api-key-summary').textContent = info.mode === 'direct' ? '更换 API Key' : '使用本机 API Key 直连（可选）';
   if (ownApi) $('api-key-box').open = false;
   $('key-hint').textContent = info.hasApiKey ? '已在本机加密保存' : '尚未设置';
   updateEstimate();
   if (ownApi) {
-    setHint('access-hint', '使用自己的 twitterapi.io API Key 直连。', 'ok');
+    setHint('access-hint', info.hasAccount
+      ? `已登录（${info.name || '超管'}${info.account_no ? `，编号 ${info.account_no}` : ''}，超管）。` +
+        (info.mode === 'direct' ? '当前使用本机 API Key 直连。' : '使用云端 API。') + (info.error ? ` ${info.error}` : '')
+      : '使用自己的 twitterapi.io API Key 直连。', info.error ? 'warn' : 'ok');
     return;
   }
   if (!info.relayConfigured) {
@@ -1214,6 +1221,11 @@ $('save-access').addEventListener('click', saveAccessCode);
 $('access-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); saveAccessCode(); } });
 $('copy-account').addEventListener('click', copyLoginAccount);
 $('logout-account').addEventListener('click', logoutAccount);
+$('login-owner-account').addEventListener('click', () => { $('access-code-row').hidden = false; $('access-code').focus(); });
+$('use-cloud-api').addEventListener('click', async () => {
+  try { await api.useCloudApi(); await renderAccess(); }
+  catch (err) { $('key-hint').textContent = errText(err); }
+});
 $('save-api-key').addEventListener('click', saveApiKey);
 $('check-update').addEventListener('click', checkUpdate);
 $('install-update').addEventListener('click', installUpdate);

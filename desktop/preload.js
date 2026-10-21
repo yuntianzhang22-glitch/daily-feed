@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('api', {
   setAccessCode: (code) => ipcRenderer.invoke('set-access-code', code),
   copyLoginAccount: () => ipcRenderer.invoke('copy-login-account'),
   setApiKey: (key) => ipcRenderer.invoke('set-api-key', key),
+  useCloudApi: () => ipcRenderer.invoke('use-cloud-api'),
   status: () => ipcRenderer.invoke('status'),
   checkUpdate: () => ipcRenderer.invoke('check-update'),
   installUpdate: () => ipcRenderer.invoke('install-update'),

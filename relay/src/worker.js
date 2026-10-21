@@ -1,15 +1,15 @@
 // Daily Feed 中转服务（Cloudflare Worker）
 //
 // - twitterapi.io 的 API Key 只存在这里（Worker Secret: TWITTERAPI_KEY），不进安装包
-// - 每个用户一个访问码。账号分两种：内测（每月额度，免费）和付费（余额制，充多少用多少）
+// - 每个用户一个私密登录账号：超管、内测（免费月额度）、付费（充值余额）
 // - 账号、用量、余额、充值记录都在一个 Durable Object（SQLite）里，扣费和充值不会互相覆盖
-// - 只放行按关注的人搜索这一个接口，查询内容做格式校验，防止访问码被拿去做别的
+// - 普通账号只放行按关注的人搜索；超管另可搜索关键词。查询与身份都在服务端检查
 // - 更新清单和内置名单仍放在 KV（ACCESS）里，供 app 拉取
 //
 // 管理接口用 ADMIN_TOKEN（Worker Secret）保护，见 relay/admin.mjs。
 
 import { DurableObject } from 'cloudflare:workers';
-import { Ledger, LEDGER_METHODS, CREDITS_PER_TWEET, MIN_CREDITS } from './ledger.js';
+import { Ledger, LEDGER_METHODS, CREDITS_PER_TWEET, MIN_CREDITS, monthKey } from './ledger.js';
 
 const TWITTERAPI_DEFAULT = 'https://api.twitterapi.io';
 const MAX_QUERY_LENGTH = 512;
@@ -87,6 +87,17 @@ function denied(r) {
   return json({ code: r.error, message, quota: r.quota, balance: r.balance, account_no: r.account_no }, status);
 }
 
+// 老凭证按需迁移，避免部署到批量迁移完成之间出现登录空窗；不覆盖已有账本数据。
+async function accountStatus(book, env, id) {
+  const current = await book.call('status', id);
+  if (current.error !== 'not_found') return current;
+  const raw = await env.ACCESS.get(`code:${id}`);
+  if (!raw) return current;
+  const usage = JSON.parse((await env.ACCESS.get(`usage:${id}:${monthKey()}`)) || 'null');
+  await book.call('importBeta', { id, user: JSON.parse(raw), usage });
+  return book.call('status', id);
+}
+
 // ------------------------------------------------------------ 公共接口
 
 async function search(request, env) {
@@ -98,11 +109,16 @@ async function search(request, env) {
   const query = String(body.query || '');
   const queryType = body.queryType === 'Latest' ? 'Latest' : 'Top';
   const cursor = typeof body.cursor === 'string' ? body.cursor.slice(0, 2048) : '';
-  if (!query || query.length > MAX_QUERY_LENGTH || !QUERY_RE.test(query) || !/from:\w+/.test(query)) {
-    return json({ code: 'bad_query', message: '只支持按关注的人搜索' }, 400);
-  }
-
   const book = ledger(env);
+  const account = await accountStatus(book, env, id);
+  if (account.error) return denied(account);
+  // 关键词搜索只向服务端确认的超管开放；请求体中的 role/plan 不参与授权。
+  const allowedQuery = account.plan === 'owner'
+    ? !/[\u0000-\u001f\u007f]/.test(query)
+    : QUERY_RE.test(query) && /from:\w+/.test(query);
+  if (!query.trim() || query.length > MAX_QUERY_LENGTH || !allowedQuery) {
+    return json({ code: 'bad_query', message: '当前身份不支持此搜索内容' }, 400);
+  }
   const auth = await book.call('authorize', id);
   if (!auth.ok) return denied(auth);
 
@@ -133,7 +149,7 @@ async function search(request, env) {
 async function status(request, env) {
   const id = await codeId(request);
   if (!id) return json({ code: 'invalid_code', message: '访问码无效或已停用' }, 401);
-  const s = await ledger(env).call('status', id);
+  const s = await accountStatus(ledger(env), env, id);
   if (s.error) return denied(s);
   return json(s);
 }
@@ -158,6 +174,13 @@ async function admin(request, env, url) {
   const run = async (fn) => {
     try { return json(await fn()); } catch (e) { return json({ code: 'bad_request', message: e.message }, 400); }
   };
+
+  // 独立超管凭证由管理端预先生成并私下保存。客户端无权自行创建/升级超管。
+  if (url.pathname === '/admin/owner' && request.method === 'POST') {
+    if (!/^df_[A-Za-z0-9_-]{43,80}$/.test(body.code || '')) return json({ message: '超管登录账号格式无效' }, 400);
+    const id = await sha256(body.code);
+    return run(() => book.call('createOwner', { id, name: body.name }));
+  }
 
   // 新建访问码：只在创建时返回一次明文
   if (url.pathname === '/admin/codes' && request.method === 'POST') {

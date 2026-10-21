@@ -15,11 +15,12 @@ async function device(lab, environment, code, account, phase, directory, balance
     DAILY_FEED_ENV: environment, DAILY_FEED_USER_DATA: path.join(root, environment, directory),
     DAILY_FEED_RELAY: lab.url, DAILY_FEED_MANIFEST: `${lab.url}/v1/latest`, DAILY_FEED_ROSTER: `${lab.url}/v1/roster`,
     LOGIN_SMOKE_PHASE: phase, LOGIN_SMOKE_ACCOUNT: code, LOGIN_SMOKE_NUMBER: account.account_no,
-    LOGIN_SMOKE_BALANCE: String(balance),
+    LOGIN_SMOKE_BALANCE: String(balance), LOGIN_SMOKE_ROLE: account.plan, LOGIN_SMOKE_DIRECT_KEY: lab.directKey,
   });
   if (environment !== 'production') Object.assign(env, {
-    DAILY_FEED_ROLE: 'paid', DAILY_FEED_SCENARIO: 'normal', DAILY_FEED_LAB_URL: lab.url,
+    DAILY_FEED_ROLE: account.plan, DAILY_FEED_SCENARIO: 'normal', DAILY_FEED_LAB_URL: lab.url,
     DAILY_FEED_LAB_TOKEN: lab.token, DAILY_FEED_LAB_ROOT: path.join(root, environment, directory),
+    DAILY_FEED_LAB_KEY: lab.directKey, DAILY_FEED_LAB_DIRECT_BASE: lab.directBase,
   });
   const child = spawn(require('electron'), ['test/production-login.cjs'], { env, stdio: 'inherit' });
   await new Promise((resolve, reject) => {
@@ -28,24 +29,26 @@ async function device(lab, environment, code, account, phase, directory, balance
   });
 }
 try {
-  for (const environment of ['production', 'test', 'staging']) {
+  for (const environment of ['production', 'test', 'staging']) for (const role of ['owner', 'beta', 'paid']) {
     const serverEnvironment = environment === 'production' ? 'test' : environment;
-    const lab = await startLab({ root: path.join(root, environment, 'server'), environment: serverEnvironment });
+    const serverRoot = path.join(root, environment, role, 'server');
+    const lab = await startLab({ root: serverRoot, environment: serverEnvironment });
     let labClosed = false;
     try {
-      const code = profiles.localCode(serverEnvironment, 'paid', 'normal');
-      const account = lab.ledger.status(lab.accounts['paid:normal']);
-      await device(lab, environment, code, account, 'first', 'device-a', 30);
-      lab.ledger.topup(account.account_no, 10, '验收模拟到账');
-      await device(lab, environment, code, account, 'restart', 'device-a', 40);
-      await device(lab, environment, code, account, 'second', 'device-b', 40);
+      const code = profiles.localCode(serverEnvironment, role, 'normal');
+      const account = lab.ledger.status(lab.accounts[`${role}:normal`]);
+      const deviceA = `${role}-device-a`, deviceB = `${role}-device-b`;
+      await device(lab, environment, code, account, 'first', deviceA, 30);
+      if (role === 'paid') lab.ledger.topup(account.account_no, 10, '验收模拟到账');
+      await device(lab, environment, code, account, 'restart', deviceA, 40);
+      await device(lab, environment, code, account, 'second', deviceB, 40);
       // 重启本地 Worker 及客户端，退出状态仍不能被自动注入的样例身份覆盖。
       await lab.close();
       labClosed = true;
-      const restarted = await startLab({ root: path.join(root, environment, 'server'), environment: serverEnvironment });
-      try { await device(restarted, environment, code, account, 'logout-restart', 'device-b', 40); }
+      const restarted = await startLab({ root: serverRoot, environment: serverEnvironment });
+      try { await device(restarted, environment, code, account, 'logout-restart', deviceB, 40); }
       finally { await restarted.close(); }
-      console.log(`${environment} login parity passed: 真实登录/复制/退出、进程和服务重启、两台设备、共享余额、本地设置独立`);
+      console.log(`${environment}/${role} login parity passed: 两台设备、独立账号、云端/本机 API、退出后重启、权限隔离、本地设置独立`);
     } finally { if (!labClosed) await lab.close(); }
   }
 } finally {

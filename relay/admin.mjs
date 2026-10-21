@@ -4,6 +4,8 @@
 // 下面的 <账号> 可以写账号（DF-XXXXX，大小写和 DF- 都可省）、名字或 id。
 //
 //   node relay/admin.mjs add "名字" [每月美元额度=3]     新建内测码（免费，每月额度）
+//   node relay/admin.mjs provision-owner [名字]          创建/恢复独立超管，凭证保存在 .local
+//   node relay/admin.mjs backup-accounts                  升级前备份账号列表
 //   node relay/admin.mjs add-paid "名字"                  新建付费码（余额 0，充值后可用）
 //   node relay/admin.mjs topup <账号> <金额> [备注]       充值（元）；负数为退款或冲正
 //   node relay/admin.mjs list                             所有账号、余额、本月用量
@@ -16,6 +18,7 @@
 //   node relay/admin.mjs publish-update dist/latest.json
 //   node relay/admin.mjs publish-roster desktop/roster.json
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { parseEnv } from 'node:util';
 
@@ -68,8 +71,11 @@ async function call(path, body) {
     method: body ? 'POST' : 'GET',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(20000),
   });
-  const data = await res.json().catch(() => ({}));
+  let data;
+  try { data = await res.json(); }
+  catch { throw new Error(`账号服务返回了非 JSON 内容（HTTP ${res.status}，${res.headers.get('content-type') || '未知类型'}），请检查网络或代理`); }
   if (!res.ok) throw new Error(`${res.status} ${data.message || ''}`);
   return data;
 }
@@ -86,12 +92,38 @@ function line(a) {
   const flag = a.disabled ? '[停用] ' : '';
   const money = a.plan === 'paid'
     ? `余额 ¥${a.balance.cny}（累计充值 ¥${a.balance.topped_cny}，本月花 ¥${a.balance.month_spent_cny}）`
+    : a.plan === 'owner' ? `无需充值，本月 API 用量 ${usd(a.quota.used_credits)}`
     : `本月 ${usd(a.quota.used_credits)} / ${usd(a.monthly_credits)}`;
-  return `${flag}${a.account_no}  ${a.name}  ${a.plan === 'paid' ? '付费' : '内测'}  ${money}  ${a.quota.requests} 次请求`;
+  return `${flag}${a.account_no}  ${a.name}  ${{owner:'超管',paid:'付费',beta:'内测'}[a.plan]}  ${money}  ${a.quota.requests} 次请求`;
 }
 
 try {
-  if (cmd === 'add' || cmd === 'add-paid') {
+  if (cmd === 'backup-accounts') {
+    const data = await call('/admin/codes');
+    const dir = new URL('../.local/', import.meta.url);
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const file = new URL(`${environment}-accounts-${Date.now()}.json`, dir);
+    fs.writeFileSync(file, JSON.stringify(data, null, 2), { mode: 0o600, flag: 'wx' });
+    const accounts = Array.isArray(data) ? data : data.accounts || data.codes || [];
+    console.log(`正式数据修改前的账号备份：${file.pathname}；记录数 ${Array.isArray(accounts) ? accounts.length : Object.keys(accounts).length}。`);
+  } else if (cmd === 'provision-owner') {
+    const file = new URL(`../.local/${environment === 'production' ? '' : 'staging-'}owner-account.json`, import.meta.url);
+    fs.mkdirSync(new URL('../.local/', import.meta.url), { recursive: true, mode: 0o700 });
+    let saved;
+    if (fs.existsSync(file)) {
+      saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (saved.relayUrl !== base || !/^df_[A-Za-z0-9_-]{43,80}$/.test(saved.code || '')) throw new Error('已保存的超管凭证与当前环境不匹配，未做更改');
+    } else {
+      saved = { relayUrl: base, code: 'df_' + crypto.randomBytes(32).toString('base64url') };
+      // 先保存再提交；网络中断后重试同一凭证，避免重复创建或遗失账号。
+      fs.writeFileSync(file, JSON.stringify(saved, null, 2), { mode: 0o600, flag: 'wx' });
+    }
+    const account = await call('/admin/owner', { code: saved.code, name: args[0] || '我的超管' });
+    if (account.plan !== 'owner') throw new Error('服务端没有确认超管身份');
+    fs.writeFileSync(file, JSON.stringify({ ...saved, account }, null, 2), { mode: 0o600 });
+    fs.chmodSync(file, 0o600);
+    console.log(`独立超管账号已就绪：${account.account_no}。私密登录凭证保存在 ${file.pathname}，未输出到日志。`);
+  } else if (cmd === 'add' || cmd === 'add-paid') {
     // add "名字" [每月美元额度=3]：内测码；add-paid "名字"：付费码，余额为 0，充值后才能用
     const [name, dollars = '3', runsPerWeek = '7', maxFollows = '60'] = args;
     if (!name) throw new Error('需要名字');

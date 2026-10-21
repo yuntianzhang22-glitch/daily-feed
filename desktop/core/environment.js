@@ -2,7 +2,7 @@
 const path = require('node:path');
 const LAB_APP_NAME = 'Daily Feed Test';
 
-const ROLES = { owner: '超管（自用 API）', beta: '内测用户', paid: '付费用户' };
+const ROLES = { owner: '超管', beta: '内测用户', paid: '付费用户' };
 const SCENARIOS = {
   owner: { normal: '正常使用' },
   beta: { normal: '额度充足', exhausted: '本月额度耗尽', disabled: '账号停用' },
@@ -15,7 +15,7 @@ function validateProfile(role, scenario) {
 }
 
 function localCode(environment, role, scenario) {
-  if (!['test', 'staging'].includes(environment) || role === 'owner') throw new Error('只能生成本地用户访问码');
+  if (!['test', 'staging'].includes(environment)) throw new Error('只能生成本地用户访问码');
   validateProfile(role, scenario);
   return `df_local_${environment}_${role}_${scenario}_only`;
 }

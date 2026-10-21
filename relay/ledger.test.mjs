@@ -35,6 +35,24 @@ test('定价：默认汇率 7.2、加价 3 倍；可以修改', () => {
   assert.throws(() => l.setPrice({ fx: 7, markup: 0.5 }), /至少为 1/);
 });
 
+test('独立超管：幂等创建、无余额和额度限制、不能升级普通账号或混用套餐', () => {
+  const l = book();
+  const owner = l.createOwner({ id: id(90), name: '我的超管' });
+  assert.equal(owner.plan, 'owner');
+  assert.deepEqual(owner.limits, {});
+  assert.equal(owner.balance, null);
+  assert.equal(owner.quota.limit_credits, null);
+  assert.equal(l.createOwner({ id: id(90) }).account_no, owner.account_no);
+  l.charge(id(90), 100000000); tick();
+  assert.equal(l.authorize(id(90)).ok, true);
+  assert.throws(() => l.topup(id(90), 10), /无需充值/);
+  assert.throws(() => l.update(id(90), { plan: 'beta' }), /不能切换/);
+  l.create({ id: id(91), name: '普通账号' });
+  assert.throws(() => l.createOwner({ id: id(91) }), /不能.*升级/);
+  assert.throws(() => l.update(id(91), { plan: 'owner' }));
+  assert.equal(l.find(id(91)).plan, 'beta');
+});
+
 test('账号：生成易读的账号，可按账号、名字、id 查找；重名时要求用账号', () => {
   const l = book();
   const a = l.create({ id: id(1), name: '张三', plan: 'paid' });
@@ -152,5 +170,8 @@ test('旧版 KV 访问码导入：保留名字、额度、限制、停用状态�
   assert.strictEqual(v.quota.requests, 3);
   l.importBeta({ id: id(7), user, usage: { credits: 45, requests: 3 } });
   assert.strictEqual(l.list().length, 1);
+  const zero = l.importBeta({ id: id(8), user: { ...user, monthly_credits: 0 } });
+  assert.strictEqual(zero.monthly_credits, 0);
+  assert.strictEqual(l.authorize(id(8)).error, 'quota_exceeded');
   assert.strictEqual(l.status(id(7)).quota.used_credits, 45);
 });

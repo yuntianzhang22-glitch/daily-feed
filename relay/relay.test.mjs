@@ -71,6 +71,41 @@ test('管理接口需要口令', async () => {
   assert.strictEqual((await call('/admin/topup', { method: 'POST', token: 'wrong', body: { ref: 'x', cny: 100 } })).status, 403);
 });
 
+test('独立超管仅管理口令可创建，凭证可在多设备验证，关键词和停用均由服务端校验', async () => {
+  const { call, admin, calls } = setup(okUpstream(2));
+  const code = 'df_' + 'owner_private_test_'.repeat(3);
+  assert.equal((await call('/admin/owner', { method: 'POST', body: { code } })).status, 403);
+  const member = await newCode(call);
+  assert.equal((await call('/admin/owner', { method: 'POST', token: member.code, body: { code } })).status, 403);
+  const owner = await admin('/admin/owner', { code, name: '我的超管' });
+  assert.equal(owner.plan, 'owner');
+  assert.equal((await admin('/admin/owner', { code })).account_no, owner.account_no);
+  for (let device = 0; device < 2; device++) {
+    const status = await (await call('/v1/status', { token: code })).json();
+    assert.equal(status.plan, 'owner');
+    assert.equal(status.account_no, owner.account_no);
+    assert.equal(status.balance, null);
+    assert.ok(!JSON.stringify(status).includes(code));
+    assert.ok(!JSON.stringify(status).includes('secret-key'));
+  }
+  // 超管登录账号与后台 ADMIN_TOKEN 分离。
+  assert.equal((await call('/admin/codes', { token: code })).status, 403);
+  const keyword = { query: '人工智能 OR "product design"', plan: 'owner', role: 'owner' };
+  assert.equal((await call('/v1/search', { method: 'POST', token: member.code, body: keyword })).status, 400);
+  assert.equal(calls.length, 0);
+  const result = await call('/v1/search', { method: 'POST', token: code, body: keyword });
+  assert.equal(result.status, 200);
+  assert.equal((await result.json()).tweets.length, 2);
+  assert.equal(new URL(calls[0].url).searchParams.get('query'), keyword.query);
+  assert.equal((await call('/admin/account', { method: 'POST', token: 'admin-token-123', body: { ref: member.account.account_no, patch: { plan: 'owner' } } })).status, 400);
+  const list = await admin('/admin/codes');
+  assert.equal(list.accounts.length, 2);
+  assert.ok(!JSON.stringify(list).includes(code));
+  await admin('/admin/account', { ref: owner.account_no, patch: { disabled: true } });
+  assert.equal((await call('/v1/status', { token: code })).status, 401);
+  assert.equal((await call('/v1/search', { method: 'POST', token: code, body: keyword })).status, 401);
+});
+
 test('访问码：账本里只存哈希；搜索转发时带 Key，Key 不出现在响应里', async () => {
   const { env, calls, call } = setup(okUpstream(3));
   const { code, account } = await newCode(call);
@@ -183,7 +218,7 @@ test('旧版 KV 访问码迁移进账本：访问码继续可用，本月用量�
   await env.ACCESS.put(`code:${id}`, JSON.stringify({ name: '管理员测试', monthly_credits: 100000, limits: { max_runs_per_week: 7, max_follows: 60 }, disabled: false }));
   await env.ACCESS.put(`usage:${id}:${month}`, JSON.stringify({ credits: 45, requests: 3, last: 0 }));
 
-  assert.strictEqual((await call('/v1/status', { token: code })).status, 401);
+  assert.strictEqual((await call('/v1/status', { token: code })).status, 200);
   const m = await admin('/admin/migrate-kv', {});
   assert.strictEqual(m.moved.length, 1);
   const s = await (await call('/v1/status', { token: code })).json();

@@ -10,9 +10,8 @@ import storeModule from '../desktop/core/store.js';
 import fetcherModule from '../desktop/core/fetcher.js';
 
 const temporary = () => fs.mkdtempSync(path.join(os.tmpdir(), 'daily-feed-lab-'));
-const clientFor = (lab, environment, role, scenario = 'normal') => new clientModule.FeedClient(role === 'owner'
-  ? { mode: 'direct', apiKey: lab.directKey, directBase: lab.directBase, maxRetries: 0 }
-  : { mode: 'relay', relayUrl: lab.url, accessCode: profiles.localCode(environment, role, scenario), maxRetries: 0 });
+const clientFor = (lab, environment, role, scenario = 'normal') => new clientModule.FeedClient(
+  { mode: 'relay', relayUrl: lab.url, accessCode: profiles.localCode(environment, role, scenario), maxRetries: 0 });
 const query = '((from:karpathy OR from:simonw) -filter:replies) since_time:1';
 
 test('真实 HTTP + Worker + 账本：三种身份、额度耗尽、余额不足、停用、充值恢复', async () => {

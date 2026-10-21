@@ -1,13 +1,14 @@
 // 访问推文数据的客户端。两种模式：
-//   relay：经 Cloudflare Worker 中转，app 里只有每人一个的访问码（同事用）
+//   relay：经 Cloudflare Worker 中转，app 里保存各身份自己的独立登录账号
 //   direct：直接调 twitterapi.io，用本机的 API Key（开发者自用 / 自建）
 // 两种模式返回的数据结构完全相同。
 const CREDITS_PER_TWEET = 15;
 const MIN_CREDITS_PER_CALL = 15;
 const TWITTERAPI_BASE = 'https://api.twitterapi.io';
 
-// 已保存自用 Key 的用户始终使用自己的 API，旧内测码不会覆盖超管身份。
-function resolveAccess({ apiKey, relayUrl, accessCode } = {}) {
+// 旧自用 Key 优先，避免旧内测码覆盖身份；显式账号登录可优先走云端。
+function resolveAccess({ apiKey, relayUrl, accessCode, preferAccount = false } = {}) {
+  if (preferAccount && relayUrl && accessCode) return { mode: 'relay', relayUrl, accessCode };
   if (apiKey) return { mode: 'direct', apiKey };
   if (relayUrl && accessCode) return { mode: 'relay', relayUrl, accessCode };
   return { mode: 'none' };
