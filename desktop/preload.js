@@ -4,6 +4,9 @@ const { contextBridge, ipcRenderer } = require('electron');
 const backend = (method, params) => ipcRenderer.invoke('backend', method, params);
 
 contextBridge.exposeInMainWorld('api', {
+  labInfo: () => ipcRenderer.invoke('lab-info'),
+  labProfile: (profile) => ipcRenderer.invoke('lab-profile', profile),
+  labTopup: () => ipcRenderer.invoke('lab-topup'),
   list: (params) => backend('list', params),
   sources: () => backend('sources'),
   counts: () => backend('counts'),

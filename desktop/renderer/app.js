@@ -11,6 +11,38 @@ const state = {
   hasMore: false,
   fetching: false,
 };
+let labContext = { enabled: false };
+
+async function initLab() {
+  labContext = await api.labInfo();
+  if (!labContext.enabled) return;
+  $('lab-panel').hidden = false;
+  $('lab-label').textContent = labContext.label;
+  $('lab-data-hint').textContent = labContext.live ? '真实 API · 会产生接口费用；账号余额为本地模拟' : '合成数据 · 无接口费用 · 与正式环境隔离';
+  $('lab-panel').title = `数据目录：${labContext.dataPath}`;
+  document.title = `Daily Feed · ${labContext.label} · ${labContext.roles[labContext.role]}`;
+  for (const [value, label] of Object.entries(labContext.roles)) $('lab-role').append(el('option', { value, text: label }));
+  $('lab-role').value = labContext.role;
+  for (const [value, label] of Object.entries(labContext.scenarios[labContext.role])) $('lab-scenario').append(el('option', { value, text: label }));
+  $('lab-scenario').value = labContext.scenario;
+  const switchTo = async (role, scenario) => {
+    try { await api.labProfile({ role, scenario }); }
+    catch (e) { $('lab-message').textContent = errText(e); $('lab-role').value = labContext.role; $('lab-scenario').value = labContext.scenario; }
+  };
+  $('lab-role').addEventListener('change', (e) => switchTo(e.target.value, 'normal'));
+  $('lab-scenario').addEventListener('change', (e) => switchTo(labContext.role, e.target.value));
+  $('lab-topup').hidden = labContext.role !== 'paid' || labContext.scenario === 'disabled';
+  $('lab-topup').addEventListener('click', async () => {
+    $('lab-topup').disabled = true;
+    try {
+      await api.labTopup();
+      $('lab-message').textContent = '已模拟到账 ¥10。打开设置查看余额，或立即抓取验收。';
+      if ($('settings').open) await renderAccess();
+    } catch (e) { $('lab-message').textContent = errText(e); }
+    finally { $('lab-topup').disabled = false; }
+  });
+  for (const id of ['access-code', 'save-access', 'api-key', 'save-api-key']) $(id).disabled = true;
+}
 
 // ------------------------------------------------------------ 工具函数
 
@@ -692,7 +724,7 @@ async function renderAccess() {
       `已连接（${info.name || '已验证'}${info.account_no ? `，账号 ${info.account_no}` : ''}，内测）。本月额度已用 ${usd(q.used_usd)} / ${usd(q.limit_usd)}` +
       (maxDays && maxDays < 7 ? `，每周最多抓 ${maxDays} 天` : '') + '。', 'ok');
   } else if (info.mode === 'direct') {
-    setHint('access-hint', '当前使用本机 API Key 直连。填写访问码后改走中转。');
+    setHint('access-hint', labContext.enabled ? '超管自用身份：API Key 直连，不受用户月额度或充值余额限制。' : '当前使用本机 API Key 直连。填写访问码后改走中转。');
   } else {
     setHint('access-hint', '还没有填写访问码。向管理员要一个，粘贴到上面。', 'warn');
   }
@@ -1137,6 +1169,7 @@ $('cancel-follows').addEventListener('click', () => $('follows-dialog').close())
 // ------------------------------------------------------------ 启动
 
 (async () => {
+  await initLab();
   await refreshSidebar();
   await loadFeed(true);
   const [info, status] = await Promise.all([api.accessInfo(), api.status()]);

@@ -1,0 +1,16 @@
+# 预发模板。运行 npm run relay:deploy:staging 自动建立独立 KV 并生成本地配置。
+name = "daily-feed-relay-staging"
+main = "src/worker.js"
+compatibility_date = "2026-10-01"
+
+[[kv_namespaces]]
+binding = "ACCESS"
+id = "REPLACE_WITH_SEPARATE_STAGING_KV_ID"
+
+[[durable_objects.bindings]]
+name = "LEDGER"
+class_name = "LedgerDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["LedgerDO"]

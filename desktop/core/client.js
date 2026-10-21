@@ -16,7 +16,7 @@ class ApiError extends Error {
 
 class FeedClient {
   // fetchImpl(url, init) -> Response，可注入以便测试
-  constructor({ mode, relayUrl, accessCode, apiKey, fetchImpl = fetch, maxRetries = 3, sleep } = {}) {
+  constructor({ mode, relayUrl, accessCode, apiKey, directBase = TWITTERAPI_BASE, fetchImpl = fetch, maxRetries = 3, sleep } = {}) {
     if (mode === 'relay' && (!relayUrl || !accessCode)) throw new ApiError('未配置访问码', 0, 'no_access');
     if (mode === 'direct' && !apiKey) throw new ApiError('未设置 API Key', 0, 'no_key');
     if (mode !== 'relay' && mode !== 'direct') throw new ApiError('未配置数据来源', 0, 'no_access');
@@ -24,6 +24,10 @@ class FeedClient {
     this.relayUrl = (relayUrl || '').replace(/\/+$/, '');
     this.accessCode = accessCode;
     this.apiKey = apiKey;
+    if (directBase !== TWITTERAPI_BASE && !/^http:\/\/127\.0\.0\.1:\d+$/.test(directBase)) {
+      throw new Error('直连接口只能使用官方地址或本地样例服务');
+    }
+    this.directBase = directBase;
     this.fetch = fetchImpl;
     this.maxRetries = maxRetries;
     this.sleep = sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
@@ -67,7 +71,7 @@ class FeedClient {
       if (body.balance !== undefined) this.balance = body.balance;
     } else {
       const qs = new URLSearchParams({ query, queryType, cursor: cursor || '' });
-      body = await this.request(`${TWITTERAPI_BASE}/twitter/tweet/advanced_search?${qs}`, {
+      body = await this.request(`${this.directBase}/twitter/tweet/advanced_search?${qs}`, {
         headers: { 'X-API-Key': this.apiKey, Accept: 'application/json' },
       });
     }

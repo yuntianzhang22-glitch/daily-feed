@@ -12,6 +12,16 @@
     <aside class="sidebar" aria-label="来源">
       <div class="drag-region"></div>
       <h1 class="brand">Daily Feed</h1>
+      <section id="lab-panel" class="lab-panel" hidden aria-label="环境验收">
+        <strong id="lab-label"></strong>
+        <p id="lab-data-hint" class="hint"></p>
+        <label for="lab-role">验收身份</label>
+        <select id="lab-role"></select>
+        <label for="lab-scenario">账号状态</label>
+        <select id="lab-scenario"></select>
+        <button id="lab-topup" class="btn" type="button" hidden>模拟转账充值 ¥10</button>
+        <p id="lab-message" class="hint" role="status" aria-live="polite"></p>
+      </section>
       <nav>
         <ul class="nav-list" id="views">
           <li><button class="nav-item active" data-view="all">全部 <span class="badge" id="count-all"></span></button></li>

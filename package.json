@@ -1,17 +1,28 @@
 {
   "name": "daily-feed",
   "productName": "Daily Feed",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "description": "X 帖子整理与推送桌面端（基于 twitterapi.io）",
   "main": "desktop/main.js",
   "scripts": {
-    "start": "electron .",
-    "test": "ELECTRON_RUN_AS_NODE=1 electron --test test/core.test.js && (test ! -f relay/relay.test.mjs || node --import ./relay/test-loader.mjs --test relay/relay.test.mjs relay/ledger.test.mjs)",
+    "start": "npm run dev",
+    "start:production": "electron .",
+    "dev": "node --import ./relay/test-loader.mjs dev/start.mjs test",
+    "staging": "node --import ./relay/test-loader.mjs dev/start.mjs staging",
+    "staging:live": "npm run staging -- --live",
+    "test": "ELECTRON_RUN_AS_NODE=1 electron --test test/core.test.js test/environment.test.cjs && node --import ./relay/test-loader.mjs --test relay/relay.test.mjs relay/ledger.test.mjs test/lab.test.mjs",
+    "test:ui": "node --import ./relay/test-loader.mjs dev/start.mjs test --smoke",
+    "relay:admin:production": "node relay/admin.mjs --env production",
+    "relay:admin:staging": "node relay/admin.mjs --env staging",
+    "relay:deploy:staging": "node dev/deploy-staging.mjs",
+    "relay:deploy:production": "wrangler deploy --config relay/wrangler.toml",
+    "release": "node build/release.mjs",
     "icon": "electron build/make-icon.js",
     "dist": "npm test && bash build/package-mac.sh"
   },
   "devDependencies": {
-    "electron": "44.9.0"
+    "electron": "44.9.0",
+    "wrangler": "4.151.2"
   }
 }

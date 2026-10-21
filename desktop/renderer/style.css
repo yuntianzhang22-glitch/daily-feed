@@ -46,6 +46,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .brand { font-size: 20px; margin: 0 8px 16px; }
 
+.lab-panel { margin: 0 4px 12px; padding: 10px; border: 1px solid #ba8a29; border-radius: 8px; background: #302619; }
+.lab-panel[hidden] { display: none; }
+.lab-panel strong { color: #ffd479; }
+.lab-panel label { display: block; margin-top: 7px; font-size: 12px; }
+.lab-panel select { width: 100%; background: var(--panel); padding: 4px; margin: 3px 0; }
+.lab-panel .btn { width: 100%; margin-top: 8px; }
+.lab-panel p { margin: 6px 0 0; font-size: 12px; }
+
 nav { flex: 1; overflow-y: auto; }
 
 .nav-heading {

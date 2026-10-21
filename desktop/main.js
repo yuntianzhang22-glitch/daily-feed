@@ -11,16 +11,14 @@ const { FeedClient } = require('./core/client');
 const { runOnce, estimateMonthlyCost, cleanUsernames } = require('./core/fetcher');
 const { Updater } = require('./core/updater');
 const { nextSlot, prevSlot } = require('./core/schedule');
+const { resolveEnvironment, ROLES, SCENARIOS, validateProfile, profilePath, localCode } = require('./core/environment');
 
 // 构建时写入的服务地址（中转、更新清单、名单）。开发时可以用环境变量覆盖。
 const APP_CONFIG = (() => {
   let cfg = {};
   try { cfg = JSON.parse(fs.readFileSync(path.join(__dirname, 'app-config.json'), 'utf8')); } catch { /* 无 */ }
-  return {
-    relayUrl: process.env.DAILY_FEED_RELAY || cfg.relayUrl || '',
-    updateManifestUrl: process.env.DAILY_FEED_MANIFEST || cfg.updateManifestUrl || '',
-    rosterUrl: process.env.DAILY_FEED_ROSTER || cfg.rosterUrl || '',
-  };
+  return resolveEnvironment({ appConfig: cfg, packaged: app.isPackaged,
+    localRoot: process.env.DAILY_FEED_LAB_ROOT || path.join(__dirname, '..', '.local', process.env.DAILY_FEED_LIVE === '1' ? 'live' : 'fixtures') });
 })();
 
 // 所有网络请求都走 Electron 的 net.fetch：它使用系统代理设置（和浏览器一样），
@@ -28,7 +26,14 @@ const APP_CONFIG = (() => {
 const netFetch = (url, init) => net.fetch(url, init);
 
 // 测试时可用环境变量指向另一个数据目录，避免碰到真实数据
-if (process.env.DAILY_FEED_USER_DATA) app.setPath('userData', process.env.DAILY_FEED_USER_DATA);
+if (APP_CONFIG.lab) {
+  // 锁、缓存、配置、数据库按环境和身份分开，可与正式应用同时打开。
+  app.setName(`Daily Feed ${APP_CONFIG.name}`);
+  fs.mkdirSync(APP_CONFIG.dataPath, { recursive: true });
+  fs.mkdirSync(path.join(APP_CONFIG.root, APP_CONFIG.name, 'browser-session'), { recursive: true });
+  app.setPath('userData', APP_CONFIG.dataPath);
+  app.setPath('sessionData', path.join(APP_CONFIG.root, APP_CONFIG.name, 'browser-session'));
+} else if (process.env.DAILY_FEED_USER_DATA) app.setPath('userData', process.env.DAILY_FEED_USER_DATA);
 const userData = () => app.getPath('userData');
 const P = {
   db: () => path.join(userData(), 'tweets.db'),
@@ -114,6 +119,12 @@ function writeApiKey(key) {
 
 // 有访问码且配置了中转就走中转；否则用本机 API Key 直连
 function accessMode() {
+  if (APP_CONFIG.lab) {
+    if (APP_CONFIG.role === 'owner') return { mode: 'direct', apiKey: process.env.DAILY_FEED_LAB_KEY,
+      directBase: process.env.DAILY_FEED_LAB_DIRECT_BASE };
+    return { mode: 'relay', relayUrl: APP_CONFIG.relayUrl,
+      accessCode: localCode(APP_CONFIG.name, APP_CONFIG.role, APP_CONFIG.scenario) };
+  }
   const access = readAccess();
   if (APP_CONFIG.relayUrl && access.code) return { mode: 'relay', relayUrl: APP_CONFIG.relayUrl, accessCode: access.code };
   const apiKey = readApiKey();
@@ -211,6 +222,7 @@ function onFetchDone(data) {
 }
 
 function notifyFetch(data) {
+  if (APP_CONFIG.lab) return;
   if (!Notification.isSupported()) return;
   if (!data.ok) {
     new Notification({ title: 'Daily Feed 抓取失败', body: data.error || '未知错误' }).show();
@@ -224,6 +236,7 @@ function notifyFetch(data) {
 }
 
 function updateBadge() {
+  if (APP_CONFIG.lab) return;
   try {
     const { unread } = store.counts();
     if (process.platform === 'darwin') app.dock.setBadge(unread ? String(unread) : '');
@@ -319,6 +332,43 @@ const handlers = {
   roster: () => loadRoster(),
 };
 
+function labInfo() {
+  if (!APP_CONFIG.lab) return { enabled: false };
+  return { enabled: true, environment: APP_CONFIG.name, label: APP_CONFIG.label,
+    role: APP_CONFIG.role, scenario: APP_CONFIG.scenario, roles: ROLES, scenarios: SCENARIOS,
+    live: APP_CONFIG.live, dataPath: userData() };
+}
+
+ipcMain.handle('lab-info', () => labInfo());
+ipcMain.handle('lab-profile', async (_e, { role, scenario }) => {
+  if (!APP_CONFIG.lab) throw new Error('正式环境不开放验收控制');
+  if (fetching) throw new Error('请等待本次抓取完成后再切换身份');
+  validateProfile(role, scenario);
+  clearTimeout(timer);
+  store.close();
+  APP_CONFIG.role = role;
+  APP_CONFIG.scenario = scenario;
+  app.setPath('userData', profilePath(APP_CONFIG.root, APP_CONFIG.name, role, scenario));
+  lastFetch = null;
+  limits = {};
+  initData();
+  await refreshLimits().catch(() => {});
+  schedule();
+  win.reload();
+  return { ok: true };
+});
+ipcMain.handle('lab-topup', async () => {
+  if (!APP_CONFIG.lab || APP_CONFIG.role !== 'paid') throw new Error('只可为本地付费验收账号模拟充值');
+  const client = makeClient();
+  const status = await client.status();
+  const response = await netFetch(`${APP_CONFIG.relayUrl}/admin/topup`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.DAILY_FEED_LAB_TOKEN}` },
+    body: JSON.stringify({ ref: status.account_no, cny: 10, note: '验收模拟转账充值，不是真实资金' }),
+  });
+  if (!response.ok) throw new Error('模拟充值失败');
+  return { ok: true };
+});
+
 ipcMain.handle('backend', (_e, method, params) => {
   const h = handlers[method];
   if (!h) throw new Error(`不允许的方法: ${method}`);
@@ -335,7 +385,8 @@ ipcMain.handle('save-config', (_e, cfg) => {
 ipcMain.handle('fetch-now', () => doFetch());
 ipcMain.handle('access-info', async () => {
   const m = accessMode();
-  const info = { mode: m.mode, relayConfigured: Boolean(APP_CONFIG.relayUrl), hasApiKey: Boolean(readApiKey()), limits };
+  const info = { mode: m.mode, relayConfigured: Boolean(APP_CONFIG.relayUrl),
+    hasApiKey: APP_CONFIG.lab ? APP_CONFIG.role === 'owner' : Boolean(readApiKey()), limits };
   if (m.mode === 'relay') {
     try {
       const s = await refreshLimits();
@@ -347,6 +398,7 @@ ipcMain.handle('access-info', async () => {
   return info;
 });
 ipcMain.handle('set-access-code', async (_e, code) => {
+  if (APP_CONFIG.lab) throw new Error('请在验收面板切换身份，不能写入正式访问码');
   code = String(code || '').trim();
   if (!code) { writeAccess(null); schedule(); return { ok: true }; }
   if (!APP_CONFIG.relayUrl) throw new Error('这个版本没有配置中转服务');
@@ -360,7 +412,10 @@ ipcMain.handle('set-access-code', async (_e, code) => {
   schedule();
   return { ok: true, name: s.name, quota: s.quota, limits };
 });
-ipcMain.handle('set-api-key', (_e, key) => { writeApiKey(String(key || '').trim()); schedule(); });
+ipcMain.handle('set-api-key', (_e, key) => {
+  if (APP_CONFIG.lab) throw new Error('真实预发 API Key 请在本地环境文件配置');
+  writeApiKey(String(key || '').trim()); schedule();
+});
 ipcMain.handle('status', () => ({ lastFetch, next: nextRun, version: app.getVersion() }));
 ipcMain.handle('check-update', () => checkForUpdate());
 ipcMain.handle('install-update', () => installUpdate());
@@ -380,7 +435,7 @@ function createWindow() {
     height: 760,
     minWidth: 760,
     minHeight: 480,
-    title: 'Daily Feed',
+    title: APP_CONFIG.lab ? `Daily Feed · ${APP_CONFIG.label}` : 'Daily Feed',
     titleBarStyle: 'hiddenInset',
     backgroundColor: '#0f1419',
     webPreferences: {
@@ -398,7 +453,7 @@ function createWindow() {
   win.webContents.on('will-navigate', (e) => e.preventDefault());
   // macOS 上关闭窗口只隐藏，保持后台定时抓取
   win.on('close', (e) => {
-    if (process.platform === 'darwin' && !app.isQuitting) {
+    if (process.platform === 'darwin' && !APP_CONFIG.lab && !app.isQuitting) {
       e.preventDefault();
       win.hide();
     }
@@ -449,5 +504,5 @@ app.on('before-quit', () => {
   try { if (store) store.close(); } catch { /* 忽略 */ }
 });
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+  if (process.platform !== 'darwin' || APP_CONFIG.lab) app.quit();
 });

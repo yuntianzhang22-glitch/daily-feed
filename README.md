@@ -23,13 +23,27 @@ xattr -dr com.apple.quarantine "/Applications/Daily Feed.app"
 
 ## 开发
 
+需要 Node.js 24。在新电脑上克隆仓库后：
+
 ```bash
-npm install
-npm test
-npm start
+npm ci
+npm run dev
 ```
 
+打开的是与正式应用隔离的测试环境，内置合成帖子；在左侧验收面板切换超管、内测、付费身份，以及额度耗尽、余额不足、停用等状态。无需 API Key，不产生 API 费用。
+
+- `npm run staging`：独立的预发验收环境
+- `npm run staging:live`：显式配置自己的预发 API Key 后，联调真实抓取
+- `npm run start:production`：正式服务和正式数据
+- `npm test` / `npm run test:ui`：业务测试 / 实际 Electron 页面验收
+- `npm run release`：构建、验证并上传正式安装包及完整开发源码包到 GitHub
+
+完整的隔离规则、账号状态、真实 API 联调、远程预发部署和发布步骤见 [环境说明](docs/ENVIRONMENTS.md)。
+
 - `desktop/`：Electron 应用（`core/` 是抓取、存储、配置、更新逻辑）
+- `relay/`：Cloudflare 中转、账号账本、管理工具与部署配置（全部随仓库迁移）
+- `dev/`：本地隔离服务、三类验收身份、合成数据和预发部署入口
+- `test/`：单元测试、HTTP 集成测试和实际页面验收
 - `build/package-mac.sh`：打包 .app、更新 zip 和 `latest.json`
 
-安装包里没有任何密钥。
+安装包和开发源码包不含真实密钥或本地数据库。更换电脑后，样例验收可直接运行；正式服务管理和真实 API 联调的凭据需要从自己的密码管理器恢复。
