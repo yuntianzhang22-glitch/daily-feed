@@ -16,7 +16,20 @@ app.whenReady().then(async () => {
     await new Promise((resolve) => win.webContents.once('did-finish-load', resolve));
     const run = (js) => win.webContents.executeJavaScript(js);
     const isHidden = (id) => run(`document.getElementById(${JSON.stringify(id)}).hidden`);
+    if (phase === 'logout-restart') {
+      assert.equal((await run('api.accessInfo()')).role, 'guest');
+      assert.equal((await run('api.accessInfo()')).mode, 'none');
+      assert.equal(fs.existsSync(path.join(app.getPath('userData'), 'access.json')), false);
+      clearTimeout(timeout);
+      app.exit(0);
+      return;
+    }
     if (phase !== 'restart') {
+      // 验收样例首次准备了登录状态；随后和正式版完全一样，从设置退出再登录。
+      if ((await run('api.labInfo()')).enabled) {
+        await run('openSettings().then(() => renderAccess())');
+        await run('window.confirm = () => true; logoutAccount()');
+      }
       assert.equal((await run('api.accessInfo()')).role, 'guest');
       await run('openSettings().then(() => renderAccess())');
       assert.equal(await isHidden('access-code-row'), false);

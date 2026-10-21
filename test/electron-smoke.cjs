@@ -1,6 +1,9 @@
 // 启动实际主进程、preload 和渲染页面，验证 IPC、身份切换和界面；不用真实账号。
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, clipboard } = require('electron');
 const assert = require('node:assert/strict');
+const { localCode } = require('../desktop/core/environment');
+let copiedAccount;
+clipboard.writeText = (text) => { copiedAccount = text; };
 require('../desktop/main');
 
 const timeout = setTimeout(() => { console.error('UI smoke timeout'); app.exit(1); }, 45000);
@@ -31,6 +34,8 @@ app.whenReady().then(async () => {
     assert.equal(await run('getComputedStyle(document.getElementById("access-code-row")).display'), 'none');
     assert.notEqual(await run('getComputedStyle(document.getElementById("api-key-box")).display'), 'none');
     assert.equal((await run('api.accessInfo()')).permissions.configureApi, true);
+    assert.equal(await run('document.getElementById("api-key").disabled'), false);
+    await run(`api.setApiKey(${JSON.stringify(process.env.DAILY_FEED_LAB_KEY)})`);
     await denied('api.setAccessCode("df_do_not_overwrite_owner")');
     await denied('api.copyLoginAccount()');
     assert.doesNotMatch(await run('document.getElementById("access-hint").textContent'), /内测|月额度|充值|访问码/);
@@ -50,8 +55,11 @@ app.whenReady().then(async () => {
       assert.match(hint, scenario === 'disabled' ? /停用/ : role === 'paid' ? /余额 ¥/ : /本月额度/);
       assert.equal(await run('document.getElementById("access-title").textContent'), '账号登录');
       assert.equal(await run('getComputedStyle(document.getElementById("access-code-row")).display'), 'none');
-      assert.equal(await run('document.getElementById("copy-account").disabled'), true);
-      await assert.rejects(run('api.copyLoginAccount()'), /验收账号/);
+      assert.equal(await run('document.getElementById("copy-account").disabled'), false);
+      assert.equal(await run('document.getElementById("logout-account").disabled'), false);
+      const code = localCode('test', role, scenario);
+      await run('copyLoginAccount()');
+      assert.equal(copiedAccount, code);
       for (const id of ['api-key-box', 'keywords-box', 'estimate-panel', 'avg-posts-field']) {
         assert.equal(await run(`getComputedStyle(document.getElementById(${JSON.stringify(id)})).display`), 'none');
       }
@@ -72,9 +80,39 @@ app.whenReady().then(async () => {
         await run('api.labTopup()');
         assert.ok((await run('api.accessInfo()')).balance.cny >= 10);
       }
-      await assert.rejects(run('api.setAccessCode("df_production_do_not_use")'));
+      // 通过真实页面退出、重载后仍未登录，再用同一页面登录；不能靠样例选择器强行授予身份。
+      const counts = await run('api.counts()');
+      await run('window.confirm = () => true; logoutAccount()');
+      assert.equal((await run('api.accessInfo()')).role, 'guest');
+      assert.equal((await run('api.fetchNow()')).started, false);
+      const reloaded = waitLoaded();
+      win.reload();
+      await reloaded;
+      await ready();
+      await run('openSettings().then(() => renderAccess())');
+      assert.equal((await run('api.accessInfo()')).mode, 'none');
+      assert.equal(await run('document.getElementById("access-code").disabled'), false);
+      assert.deepEqual(await run('api.counts()'), counts);
+      await run('api.labCopyAccount()');
+      assert.equal(copiedAccount, code);
+      await assert.rejects(run(`api.setAccessCode(${JSON.stringify(localCode('staging', role, scenario))})`), /无效/);
+      await assert.rejects(run('api.setAccessCode("df_production_do_not_use")'), /无效/);
+      if (scenario === 'disabled') {
+        await run(`document.getElementById('access-code').value = ${JSON.stringify(code)}; saveAccessCode()`);
+        assert.match(await run('document.getElementById("access-hint").textContent'), /停用/);
+        assert.equal((await run('api.accessInfo()')).role, 'guest');
+      } else {
+        await run(`document.getElementById('access-code').value = ${JSON.stringify(code)}; saveAccessCode()`);
+        assert.equal((await run('api.accessInfo()')).role, role);
+      }
     }
-    console.log('UI smoke passed: 三类身份全部状态、界面权限隔离、IPC 越权拒绝、充值和普通设置保存');
+    // 当前选择付费停用样例，实际登录内测正常账号时只能拥有内测权限。
+    await run(`api.setAccessCode(${JSON.stringify(localCode('test', 'beta', 'normal'))})`);
+    const actual = await run('api.accessInfo()');
+    assert.equal(actual.role, 'beta');
+    assert.equal(actual.permissions.viewBalance, false);
+    assert.equal(actual.permissions.viewMonthlyQuota, true);
+    console.log('UI smoke passed: 三类身份全部状态、真实登录/复制/退出/重载、停用拒绝、跨环境拒绝、权限按实际账号、充值和设置');
     clearTimeout(timeout);
     app.exit(0);
   } catch (e) { console.error(e); clearTimeout(timeout); app.exit(1); }

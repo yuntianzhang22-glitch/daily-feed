@@ -1,4 +1,4 @@
-// 用真实 Worker + 正式客户端入口验收：两台独立设备、进程重启、共享余额和本地数据独立。
+// 同一套实际登录流程分别验收正式、测试、预发：两台设备、登录/退出后重启、共享余额、本地数据独立。
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,16 +9,17 @@ import profiles from '../desktop/core/environment.js';
 
 const require = createRequire(import.meta.url);
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'daily-feed-login-'));
-const lab = await startLab({ root, environment: 'test' });
-const code = profiles.localCode('test', 'paid', 'normal');
-const account = lab.ledger.status(lab.accounts['paid:normal']);
-async function device(phase, directory, balance) {
+async function device(lab, environment, code, account, phase, directory, balance) {
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('DAILY_FEED_') && key !== 'ELECTRON_RUN_AS_NODE'));
   Object.assign(env, {
-    DAILY_FEED_ENV: 'production', DAILY_FEED_USER_DATA: path.join(root, directory),
+    DAILY_FEED_ENV: environment, DAILY_FEED_USER_DATA: path.join(root, environment, directory),
     DAILY_FEED_RELAY: lab.url, DAILY_FEED_MANIFEST: `${lab.url}/v1/latest`, DAILY_FEED_ROSTER: `${lab.url}/v1/roster`,
     LOGIN_SMOKE_PHASE: phase, LOGIN_SMOKE_ACCOUNT: code, LOGIN_SMOKE_NUMBER: account.account_no,
     LOGIN_SMOKE_BALANCE: String(balance),
+  });
+  if (environment !== 'production') Object.assign(env, {
+    DAILY_FEED_ROLE: 'paid', DAILY_FEED_SCENARIO: 'normal', DAILY_FEED_LAB_URL: lab.url,
+    DAILY_FEED_LAB_TOKEN: lab.token, DAILY_FEED_LAB_ROOT: path.join(root, environment, directory),
   });
   const child = spawn(require('electron'), ['test/production-login.cjs'], { env, stdio: 'inherit' });
   await new Promise((resolve, reject) => {
@@ -27,12 +28,26 @@ async function device(phase, directory, balance) {
   });
 }
 try {
-  await device('first', 'device-a', 30);
-  lab.ledger.topup(account.account_no, 10, '验收模拟到账');
-  await device('restart', 'device-a', 40);
-  await device('second', 'device-b', 40);
-  console.log('Production login passed: 无密码登录、旧凭证兼容、进程重启、两台设备共用余额、本地设置独立、复制与退出');
+  for (const environment of ['production', 'test', 'staging']) {
+    const serverEnvironment = environment === 'production' ? 'test' : environment;
+    const lab = await startLab({ root: path.join(root, environment, 'server'), environment: serverEnvironment });
+    let labClosed = false;
+    try {
+      const code = profiles.localCode(serverEnvironment, 'paid', 'normal');
+      const account = lab.ledger.status(lab.accounts['paid:normal']);
+      await device(lab, environment, code, account, 'first', 'device-a', 30);
+      lab.ledger.topup(account.account_no, 10, '验收模拟到账');
+      await device(lab, environment, code, account, 'restart', 'device-a', 40);
+      await device(lab, environment, code, account, 'second', 'device-b', 40);
+      // 重启本地 Worker 及客户端，退出状态仍不能被自动注入的样例身份覆盖。
+      await lab.close();
+      labClosed = true;
+      const restarted = await startLab({ root: path.join(root, environment, 'server'), environment: serverEnvironment });
+      try { await device(restarted, environment, code, account, 'logout-restart', 'device-b', 40); }
+      finally { await restarted.close(); }
+      console.log(`${environment} login parity passed: 真实登录/复制/退出、进程和服务重启、两台设备、共享余额、本地设置独立`);
+    } finally { if (!labClosed) await lab.close(); }
+  }
 } finally {
-  await lab.close();
   fs.rmSync(root, { recursive: true, force: true });
 }

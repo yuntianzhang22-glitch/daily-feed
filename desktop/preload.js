@@ -5,6 +5,7 @@ const backend = (method, params) => ipcRenderer.invoke('backend', method, params
 
 contextBridge.exposeInMainWorld('api', {
   labInfo: () => ipcRenderer.invoke('lab-info'),
+  labCopyAccount: () => ipcRenderer.invoke('lab-copy-account'),
   labProfile: (profile) => ipcRenderer.invoke('lab-profile', profile),
   labTopup: () => ipcRenderer.invoke('lab-topup'),
   list: (params) => backend('list', params),

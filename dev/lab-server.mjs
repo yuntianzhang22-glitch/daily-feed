@@ -22,7 +22,10 @@ export async function startLab({ root, environment, port = 0, liveApiKey = '' })
   const obj = new LedgerDO({ storage: { sql } }, {});
   const ledger = obj.ledger;
   const token = crypto.randomBytes(32).toString('hex');
-  const fixtureKey = crypto.randomBytes(32).toString('hex');
+  // 样例直连 Key 跨服务重启保持有效，才能真实验收本机凭据持久化。
+  const fixtureKeyFile = path.join(dir, 'direct-key');
+  const fixtureKey = fs.existsSync(fixtureKeyFile) ? fs.readFileSync(fixtureKeyFile, 'utf8') : crypto.randomBytes(32).toString('hex');
+  if (!fs.existsSync(fixtureKeyFile)) fs.writeFileSync(fixtureKeyFile, fixtureKey, { mode: 0o600 });
   const kvFile = path.join(dir, 'public.json');
   const kv = fs.existsSync(kvFile) ? JSON.parse(fs.readFileSync(kvFile, 'utf8')) : {};
   kv['public:roster.json'] = fs.readFileSync(new URL('../desktop/roster.json', import.meta.url), 'utf8');

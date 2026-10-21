@@ -97,6 +97,25 @@ function initData() {
     backupDir: P.backups(),
   });
   config.load();
+  seedLabLogin();
+}
+
+// 验收工具仅准备首次样例凭据；之后的登录、退出与重启复用正式逻辑。
+// 标记独立于凭据文件，退出删除凭据后，重启不会悄悄恢复登录。
+function seedLabLogin(reset = false) {
+  if (!APP_CONFIG.lab) return;
+  const marker = path.join(userData(), 'lab-login-initialized');
+  if (!reset && fs.existsSync(marker)) return;
+  if (reset || (!fs.existsSync(P.access()) && !fs.existsSync(P.apiKey()))) {
+    if (APP_CONFIG.role === 'owner') {
+      writeAccess(null);
+      writeApiKey(process.env.DAILY_FEED_LAB_KEY);
+    } else {
+      writeApiKey(null);
+      writeAccess(localCode(APP_CONFIG.name, APP_CONFIG.role, APP_CONFIG.scenario), APP_CONFIG.role);
+    }
+  }
+  fs.writeFileSync(marker, '1', { mode: 0o600 });
 }
 
 // ------------------------------------------------------------ 访问方式：访问码（同事）或 API Key（自用）
@@ -128,13 +147,10 @@ function writeApiKey(key) {
 
 // 自用 API Key 优先；只有访问码的内测/付费用户走中转。
 function accessMode() {
-  if (APP_CONFIG.lab) {
-    if (APP_CONFIG.role === 'owner') return { mode: 'direct', apiKey: process.env.DAILY_FEED_LAB_KEY,
-      directBase: process.env.DAILY_FEED_LAB_DIRECT_BASE };
-    return { mode: 'relay', relayUrl: APP_CONFIG.relayUrl,
-      accessCode: localCode(APP_CONFIG.name, APP_CONFIG.role, APP_CONFIG.scenario) };
-  }
-  return resolveAccess({ apiKey: readApiKey(), relayUrl: APP_CONFIG.relayUrl, accessCode: readAccess().code });
+  const access = resolveAccess({ apiKey: readApiKey(), relayUrl: APP_CONFIG.relayUrl, accessCode: readAccess().code });
+  // 只替换验收上游地址，账号与权限判断不因测试环境而改变。
+  if (APP_CONFIG.lab && access.mode === 'direct') access.directBase = process.env.DAILY_FEED_LAB_DIRECT_BASE;
+  return access;
 }
 
 function makeClient() {
@@ -142,7 +158,6 @@ function makeClient() {
 }
 
 function currentRole() {
-  if (APP_CONFIG.lab) return APP_CONFIG.role;
   if (accessMode().mode === 'direct') return 'owner';
   const access = readAccess();
   return access.code && ['beta', 'paid'].includes(access.plan) ? access.plan : 'guest';
@@ -153,13 +168,15 @@ const currentConfig = () => visibleSettings(config.load(), currentRole());
 
 async function refreshLimits() {
   const m = accessMode();
+  const accessFile = P.access();
   if (m.mode !== 'relay') { limits = {}; return null; }
   const client = makeClient();
   const s = await client.status();
   const plan = verifiedMemberRole(s.plan);
-  if (!APP_CONFIG.lab && accessMode().mode === 'relay' && readAccess().code === m.accessCode) {
-    writeAccess(m.accessCode, plan);
+  if (P.access() !== accessFile || accessMode().mode !== 'relay' || readAccess().code !== m.accessCode) {
+    throw new Error('登录状态已变更，请重试');
   }
+  writeAccess(m.accessCode, plan);
   limits = s.limits || {};
   return s;
 }
@@ -359,6 +376,12 @@ function labInfo() {
 }
 
 ipcMain.handle('lab-info', () => labInfo());
+ipcMain.handle('lab-copy-account', () => {
+  if (!APP_CONFIG.lab) throw new Error('正式环境不开放验收控制');
+  if (APP_CONFIG.role === 'owner') throw new Error('超管样例使用 API Key');
+  clipboard.writeText(localCode(APP_CONFIG.name, APP_CONFIG.role, APP_CONFIG.scenario));
+  return { ok: true };
+});
 ipcMain.handle('lab-profile', async (_e, { role, scenario }) => {
   if (!APP_CONFIG.lab) throw new Error('正式环境不开放验收控制');
   if (fetching) throw new Error('请等待本次抓取完成后再切换身份');
@@ -371,13 +394,14 @@ ipcMain.handle('lab-profile', async (_e, { role, scenario }) => {
   lastFetch = null;
   limits = {};
   initData();
+  seedLabLogin(true);
   await refreshLimits().catch(() => {});
   schedule();
   win.reload();
   return { ok: true };
 });
 ipcMain.handle('lab-topup', async () => {
-  if (!APP_CONFIG.lab || APP_CONFIG.role !== 'paid') throw new Error('只可为本地付费验收账号模拟充值');
+  if (!APP_CONFIG.lab || currentRole() !== 'paid') throw new Error('只可为本地付费验收账号模拟充值');
   const client = makeClient();
   const status = await client.status();
   const response = await netFetch(`${APP_CONFIG.relayUrl}/admin/topup`, {
@@ -421,14 +445,16 @@ ipcMain.handle('access-info', async () => {
 });
 ipcMain.handle('set-access-code', async (_e, code) => {
   authorize('configureAccessCode');
-  if (APP_CONFIG.lab) throw new Error('请在验收面板切换身份，不能修改正式登录账号');
   if (fetching) throw new Error('请等待当前抓取完成后再登录或退出');
   code = String(code || '').trim();
   if (!code) { writeAccess(null); limits = {}; schedule(); return { ok: true }; }
   if (!APP_CONFIG.relayUrl) throw new Error('这个版本没有配置中转服务');
   // 先验证再保存
   const client = new FeedClient({ mode: 'relay', relayUrl: APP_CONFIG.relayUrl, accessCode: code, fetchImpl: netFetch });
+  const accessFile = P.access();
   const s = await client.status();
+  if (P.access() !== accessFile) throw new Error('验收样例已切换，请重新登录');
+  if (fetching) throw new Error('请等待当前抓取完成后再登录或退出');
   writeAccess(code, verifiedMemberRole(s.plan));
   limits = s.limits || {};
   // 立即按新的限制修正已有配置（比如最短间隔）
@@ -439,7 +465,6 @@ ipcMain.handle('set-access-code', async (_e, code) => {
 // 登录账号本身是私密凭证。只在用户主动复制时写入剪贴板，不传回页面或状态接口。
 ipcMain.handle('copy-login-account', () => {
   authorize('configureAccessCode');
-  if (APP_CONFIG.lab) throw new Error('验收账号只用于本地测试，不能复制为正式登录账号');
   const code = readAccess().code;
   if (!code) throw new Error('请先登录账号');
   clipboard.writeText(code);
@@ -447,7 +472,6 @@ ipcMain.handle('copy-login-account', () => {
 });
 ipcMain.handle('set-api-key', (_e, key) => {
   authorize('configureApi');
-  if (APP_CONFIG.lab) throw new Error('真实预发 API Key 请在本地环境文件配置');
   writeApiKey(String(key || '').trim());
   if (readApiKey()) limits = {};
   schedule();

@@ -18,14 +18,13 @@ function applyIdentity(info) {
   identity = { role: info.role, permissions: info.permissions || {} };
   const p = identity.permissions;
   $('api-key-box').hidden = !p.configureApi;
-  $('api-key').disabled = !p.configureApi || labContext.enabled;
-  $('save-api-key').disabled = !p.configureApi || labContext.enabled;
+  $('api-key').disabled = !p.configureApi;
+  $('save-api-key').disabled = !p.configureApi;
   const member = p.configureAccessCode && info.relayConfigured;
   $('access-code-row').hidden = !member || info.mode === 'relay';
   $('account-actions').hidden = !member || info.mode !== 'relay';
   $('account-help').hidden = !member;
-  $('copy-account').disabled = Boolean(labContext.enabled);
-  $('logout-account').disabled = Boolean(labContext.enabled);
+  if (labContext.enabled) $('lab-topup').hidden = info.role !== 'paid' || Boolean(info.error);
   $('keywords-box').hidden = !p.configureKeywords;
   $('keywords').disabled = !p.configureKeywords;
   $('estimate-panel').hidden = !p.viewApiCosts;
@@ -45,6 +44,13 @@ async function initLab() {
   $('lab-role').value = labContext.role;
   for (const [value, label] of Object.entries(labContext.scenarios[labContext.role])) $('lab-scenario').append(el('option', { value, text: label }));
   $('lab-scenario').value = labContext.scenario;
+  $('lab-copy-account').hidden = labContext.role === 'owner';
+  $('lab-copy-account').addEventListener('click', async () => {
+    try {
+      await api.labCopyAccount();
+      $('lab-message').textContent = '样例登录账号已复制，可在设置中退出后重新登录；仅在当前隔离环境有效。';
+    } catch (e) { $('lab-message').textContent = errText(e); }
+  });
   const switchTo = async (role, scenario) => {
     try { await api.labProfile({ role, scenario }); }
     catch (e) { $('lab-message').textContent = errText(e); $('lab-role').value = labContext.role; $('lab-scenario').value = labContext.scenario; }
@@ -61,7 +67,6 @@ async function initLab() {
     } catch (e) { $('lab-message').textContent = errText(e); }
     finally { $('lab-topup').disabled = false; }
   });
-  for (const id of ['access-code', 'save-access', 'api-key', 'save-api-key']) $(id).disabled = true;
 }
 
 // ------------------------------------------------------------ 工具函数
@@ -722,14 +727,12 @@ async function renderAccess() {
   applyIdentity(info);
   const ownApi = identity.role === 'owner';
   $('access-title').textContent = ownApi ? 'API 连接' : '账号登录';
-  $('account-help').textContent = labContext.enabled
-    ? '当前为本地验收账号，请用验收面板切换身份。'
-    : info.mode === 'relay'
-      ? '登录状态已保存在本机。复制完整登录账号，在其他设备输入一次即可登录。登录账号请私下保管；DF- 开头的短编号仅用于充值备注。本机的关注、收藏和阅读记录暂不同步。'
-      : '只需登录账号，无需密码或额外访问码。原访问码可直接作为登录账号使用；充值备注用的 DF- 短编号不能登录。';
+  $('account-help').textContent = info.mode === 'relay'
+    ? '登录状态已保存在本机。复制完整登录账号，在其他设备输入一次即可登录。登录账号请私下保管；DF- 开头的短编号仅用于充值备注。本机的关注、收藏和阅读记录暂不同步。'
+    : '只需登录账号，无需密码或额外访问码。原访问码可直接作为登录账号使用；充值备注用的 DF- 短编号不能登录。';
   $('api-key-summary').textContent = '更换 API Key';
   if (ownApi) $('api-key-box').open = false;
-  $('key-hint').textContent = labContext.enabled ? 'API Key 由隔离验收环境提供' : info.hasApiKey ? '已在本机加密保存' : '尚未设置';
+  $('key-hint').textContent = info.hasApiKey ? '已在本机加密保存' : '尚未设置';
   updateEstimate();
   if (ownApi) {
     setHint('access-hint', '使用自己的 twitterapi.io API Key 直连。', 'ok');
@@ -797,7 +800,7 @@ async function logoutAccount() {
     loadSchedule(settingsCfg);
     $('access-code').focus();
   } catch (err) { setHint('access-hint', errText(err), 'warn'); }
-  finally { btn.disabled = Boolean(labContext.enabled); }
+  finally { btn.disabled = false; }
 }
 
 async function saveApiKey() {
