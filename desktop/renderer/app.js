@@ -30,11 +30,12 @@ function applyIdentity(info) {
 async function initLab() {
   labContext = await api.labInfo();
   if (!labContext.enabled) return;
+  document.querySelector('.brand').textContent = 'Daily Feed Test';
   $('lab-panel').hidden = false;
   $('lab-label').textContent = labContext.label;
   $('lab-data-hint').textContent = labContext.live ? '真实 API · 会产生接口费用；账号余额为本地模拟' : '合成数据 · 无接口费用 · 与正式环境隔离';
   $('lab-panel').title = `数据目录：${labContext.dataPath}`;
-  document.title = `Daily Feed · ${labContext.label} · ${labContext.roles[labContext.role]}`;
+  document.title = `Daily Feed Test · ${labContext.label} · ${labContext.roles[labContext.role]}`;
   for (const [value, label] of Object.entries(labContext.roles)) $('lab-role').append(el('option', { value, text: label }));
   $('lab-role').value = labContext.role;
   for (const [value, label] of Object.entries(labContext.scenarios[labContext.role])) $('lab-scenario').append(el('option', { value, text: label }));

@@ -5,7 +5,7 @@ const files = execFileSync('git', ['ls-files', '-z'], { encoding: 'utf8' }).spli
 const required = [
   'relay/src/worker.js', 'relay/src/ledger.js', 'relay/admin.mjs', 'relay/test-loader.mjs',
   'relay/wrangler.toml', 'relay/wrangler.staging.toml', 'relay/relay.test.mjs', 'relay/ledger.test.mjs',
-  'dev/start.mjs', 'dev/lab-server.mjs', 'dev/fixtures.cjs', '.env.staging.example',
+  'dev/start.mjs', 'dev/lab-server.mjs', 'dev/fixtures.cjs', 'dev/test-runtime.mjs', '.env.staging.example',
   'desktop/core/permissions.js', 'dev/setup-owner.cjs', '.env.owner.example',
   'docs/ENVIRONMENTS.md', 'docs/RELEASE_NOTES.md', 'package-lock.json', 'test/lab.test.mjs', 'test/electron-smoke.cjs',
 ];

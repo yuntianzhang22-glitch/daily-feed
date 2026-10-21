@@ -13,6 +13,7 @@ npm run dev
 
 不需要拷贝旧电脑的数据库、Python、API Key 或 Cloudflare 登录状态，就能进入带有合成帖子的实际应用。
 中转 Worker、SQLite 账本和客户端使用同一套业务代码；本地适配器只替代 Cloudflare 绑定和上游数据。
+macOS 上测试和预发应用统一显示为 **Daily Feed Test**，使用与正式版相同的图标。首次运行会在 `.local/runtime/` 自动生成独立的应用外壳，之后复用缓存；不会修改 `node_modules` 中的 Electron 或正式应用。仍通过 `npm run dev` / `npm run staging` 启动，以便同时启动对应的隔离服务。
 
 ## 环境
 

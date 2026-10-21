@@ -11,14 +11,22 @@ const { FeedClient, resolveAccess } = require('./core/client');
 const { runOnce, estimateMonthlyCost, cleanUsernames } = require('./core/fetcher');
 const { Updater } = require('./core/updater');
 const { nextSlot, prevSlot } = require('./core/schedule');
-const { resolveEnvironment, ROLES, SCENARIOS, validateProfile, profilePath, localCode } = require('./core/environment');
+const { LAB_APP_NAME, resolveEnvironment, ROLES, SCENARIOS, validateProfile, profilePath, localCode } = require('./core/environment');
 const { identityFor, requirePermission, verifiedMemberRole, visibleSettings, applySettings, fetchSettings } = require('./core/permissions');
 
 // 构建时写入的服务地址（中转、更新清单、名单）。开发时可以用环境变量覆盖。
 const APP_CONFIG = (() => {
   let cfg = {};
   try { cfg = JSON.parse(fs.readFileSync(path.join(__dirname, 'app-config.json'), 'utf8')); } catch { /* 无 */ }
-  return resolveEnvironment({ appConfig: cfg, packaged: app.isPackaged,
+  // 自定义 macOS 测试外壳会被 Electron 标为 packaged；只允许它从本仓库加载源码。
+  // 正式安装包在 Resources/app 下，没有源码开发入口，也不能使用本地验收身份。
+  const sourceRoot = path.resolve(__dirname, '..');
+  const sourceEntry = app.getAppPath() === sourceRoot
+    || process.argv[1] === path.join(sourceRoot, 'test', 'electron-smoke.cjs');
+  const developmentRuntime = sourceEntry
+    && process.execPath.startsWith(path.join(sourceRoot, '.local', 'runtime') + path.sep)
+    && fs.existsSync(path.join(sourceRoot, 'dev', 'start.mjs'));
+  return resolveEnvironment({ appConfig: cfg, packaged: app.isPackaged, developmentRuntime,
     localRoot: process.env.DAILY_FEED_LAB_ROOT || path.join(__dirname, '..', '.local', process.env.DAILY_FEED_LIVE === '1' ? 'live' : 'fixtures') });
 })();
 
@@ -29,7 +37,7 @@ const netFetch = (url, init) => net.fetch(url, init);
 // 测试时可用环境变量指向另一个数据目录，避免碰到真实数据
 if (APP_CONFIG.lab) {
   // 锁、缓存、配置、数据库按环境和身份分开，可与正式应用同时打开。
-  app.setName(`Daily Feed ${APP_CONFIG.name}`);
+  app.setName(LAB_APP_NAME);
   fs.mkdirSync(APP_CONFIG.dataPath, { recursive: true });
   fs.mkdirSync(path.join(APP_CONFIG.root, APP_CONFIG.name, 'browser-session'), { recursive: true });
   app.setPath('userData', APP_CONFIG.dataPath);
@@ -453,7 +461,7 @@ function createWindow() {
     height: 760,
     minWidth: 760,
     minHeight: 480,
-    title: APP_CONFIG.lab ? `Daily Feed · ${APP_CONFIG.label}` : 'Daily Feed',
+    title: APP_CONFIG.lab ? `${LAB_APP_NAME} · ${APP_CONFIG.label}` : 'Daily Feed',
     titleBarStyle: 'hiddenInset',
     backgroundColor: '#0f1419',
     webPreferences: {

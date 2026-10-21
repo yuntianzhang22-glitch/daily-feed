@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { startLab } from './lab-server.mjs';
+import { testRuntime } from './test-runtime.mjs';
 import profiles from '../desktop/core/environment.js';
 import fixtures from './fixtures.cjs';
 import storeModule from '../desktop/core/store.js';
@@ -49,7 +50,7 @@ Object.assign(env, {
   DAILY_FEED_LAB_KEY: lab.directKey, DAILY_FEED_LAB_DIRECT_BASE: lab.directBase,
 });
 console.log(`${environment === 'test' ? '测试' : '预发'}环境 · ${live ? '真实 API（会产生接口费用）' : '合成数据（不调用外部 API）'}\n${lab.url}\n界面内可切换三类身份和异常状态；数据：${root}/${environment}`);
-const electron = createRequire(import.meta.url)('electron');
+const electron = testRuntime(repo, environment);
 const child = spawn(electron, [smoke ? path.join(repo, 'test/electron-smoke.cjs') : repo], { cwd: repo, env, stdio: 'inherit' });
 let closing = false;
 async function close(code = 0) {
@@ -60,7 +61,7 @@ async function close(code = 0) {
   if (smoke) fs.rmSync(root, { recursive: true, force: true });
   process.exit(code);
 }
-child.on('exit', (code) => close(code || 0));
+child.on('exit', (code, signal) => close(code ?? (signal ? 1 : 0)));
 child.on('error', () => close(1));
 process.on('SIGINT', () => close());
 process.on('SIGTERM', () => close());

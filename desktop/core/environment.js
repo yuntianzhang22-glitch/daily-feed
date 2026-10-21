@@ -1,5 +1,6 @@
 // 环境与验收身份。正式应用不读取本地验收账号，也不开放验收控制。
 const path = require('node:path');
+const LAB_APP_NAME = 'Daily Feed Test';
 
 const ROLES = { owner: '超管（自用 API）', beta: '内测用户', paid: '付费用户' };
 const SCENARIOS = {
@@ -25,10 +26,10 @@ function profilePath(root, environment, role, scenario) {
   return path.join(root, environment, 'profiles', role, scenario);
 }
 
-function resolveEnvironment({ env = process.env, packaged = false, appConfig = {}, localRoot }) {
+function resolveEnvironment({ env = process.env, packaged = false, developmentRuntime = false, appConfig = {}, localRoot }) {
   const name = env.DAILY_FEED_ENV || 'production';
   if (!['production', 'test', 'staging'].includes(name)) throw new Error('未知的运行环境');
-  if (packaged && name !== 'production') throw new Error('正式安装包不支持本地验收模式，请从完整开发仓库启动');
+  if (packaged && !developmentRuntime && name !== 'production') throw new Error('正式安装包不支持本地验收模式，请从完整开发仓库启动');
   if (name === 'production') return {
     name, label: '正式环境', lab: false,
     relayUrl: env.DAILY_FEED_RELAY || appConfig.relayUrl || '',
@@ -52,4 +53,4 @@ function resolveEnvironment({ env = process.env, packaged = false, appConfig = {
   };
 }
 
-module.exports = { ROLES, SCENARIOS, validateProfile, localCode, profilePath, resolveEnvironment };
+module.exports = { LAB_APP_NAME, ROLES, SCENARIOS, validateProfile, localCode, profilePath, resolveEnvironment };
