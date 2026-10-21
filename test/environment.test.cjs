@@ -2,6 +2,31 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { resolveEnvironment, profilePath, localCode, SCENARIOS } = require('../desktop/core/environment');
 const { FeedClient, resolveAccess } = require('../desktop/core/client');
+const { identityFor, requirePermission, verifiedMemberRole, visibleSettings, applySettings, fetchSettings } = require('../desktop/core/permissions');
+
+test('用户身份不能通过访问码或配置字段升级；普通身份不能读取/修改超管配置', () => {
+  const before = { version: 3, follows: ['karpathy'], keywords: ['secret query'], group_size: 8, max_pages: 10, avg_posts_per_day: 5 };
+  for (const role of ['beta', 'paid', 'guest', 'unknown']) {
+    assert.throws(() => requirePermission(role, 'configureApi'), { code: 'permission_denied' });
+    assert.throws(() => requirePermission(role, 'viewApiCosts'), { code: 'permission_denied' });
+    for (const patch of [{ keywords: [] }, { max_pages: 10 }, { role: 'owner' }, { permissions: { configureApi: true } }]) {
+      assert.throws(() => applySettings(before, patch, role), { code: 'permission_denied' });
+    }
+    assert.deepEqual(visibleSettings(before, role), { version: 3, follows: ['karpathy'] });
+    assert.deepEqual(fetchSettings(before, role).keywords, []);
+    assert.equal(fetchSettings(before, role).max_pages, 1);
+    assert.deepEqual(applySettings(before, { follows: ['simonw'] }, role).follows, ['simonw']);
+  }
+  assert.equal(verifiedMemberRole('paid'), 'paid');
+  assert.equal(verifiedMemberRole(), 'beta'); // 兼容旧中转：不带 plan 的有效访问码只授予内测权限
+  assert.throws(() => verifiedMemberRole('owner'));
+  assert.equal(identityFor('beta').permissions.viewMonthlyQuota, true);
+  assert.equal(identityFor('beta').permissions.viewBalance, false);
+  assert.equal(identityFor('paid').permissions.viewBalance, true);
+  assert.equal(identityFor('paid').permissions.viewMonthlyQuota, false);
+  assert.doesNotThrow(() => requirePermission('owner', 'configureApi'));
+  assert.throws(() => requirePermission('owner', 'configureAccessCode'), { code: 'permission_denied' });
+});
 
 test('超管的自用 API Key 优先于残留内测码；仅有访问码的用户继续走中转', () => {
   const relay = { relayUrl: 'https://relay.example', accessCode: 'df_old_beta_code' };

@@ -12,6 +12,7 @@ const { runOnce, estimateMonthlyCost, cleanUsernames } = require('./core/fetcher
 const { Updater } = require('./core/updater');
 const { nextSlot, prevSlot } = require('./core/schedule');
 const { resolveEnvironment, ROLES, SCENARIOS, validateProfile, profilePath, localCode } = require('./core/environment');
+const { identityFor, requirePermission, verifiedMemberRole, visibleSettings, applySettings, fetchSettings } = require('./core/permissions');
 
 // 构建时写入的服务地址（中转、更新清单、名单）。开发时可以用环境变量覆盖。
 const APP_CONFIG = (() => {
@@ -97,9 +98,9 @@ function readAccess() {
 }
 
 // 访问码本身可随时停用，存普通文件即可，避免每次更新后钥匙串弹窗
-function writeAccess(code) {
+function writeAccess(code, plan) {
   if (!code) { fs.rmSync(P.access(), { force: true }); return; }
-  fs.writeFileSync(P.access(), JSON.stringify({ code }), { mode: 0o600 });
+  fs.writeFileSync(P.access(), JSON.stringify({ code, ...(plan ? { plan: verifiedMemberRole(plan) } : {}) }), { mode: 0o600 });
 }
 
 function readApiKey() {
@@ -132,11 +133,25 @@ function makeClient() {
   return new FeedClient({ ...accessMode(), fetchImpl: netFetch });
 }
 
+function currentRole() {
+  if (APP_CONFIG.lab) return APP_CONFIG.role;
+  if (accessMode().mode === 'direct') return 'owner';
+  const access = readAccess();
+  return access.code && ['beta', 'paid'].includes(access.plan) ? access.plan : 'guest';
+}
+
+const authorize = (permission) => requirePermission(currentRole(), permission);
+const currentConfig = () => visibleSettings(config.load(), currentRole());
+
 async function refreshLimits() {
   const m = accessMode();
   if (m.mode !== 'relay') { limits = {}; return null; }
   const client = makeClient();
   const s = await client.status();
+  const plan = verifiedMemberRole(s.plan);
+  if (!APP_CONFIG.lab && accessMode().mode === 'relay' && readAccess().code === m.accessCode) {
+    writeAccess(m.accessCode, plan);
+  }
   limits = s.limits || {};
   return s;
 }
@@ -178,7 +193,7 @@ async function doFetch() {
     onFetchDone({ ok: false, error: '还没有填写访问码，请在设置里填写' });
     return { started: false };
   }
-  const cfg = config.load();
+  const cfg = fetchSettings(config.load(), currentRole());
   if (!cfg.follows.length && !cfg.keywords.length) {
     onFetchDone({ ok: false, error: '还没有关注任何人，先去「关注」里勾选' });
     return { started: false };
@@ -322,9 +337,9 @@ const handlers = {
   counts: () => store.counts(),
   set_flag: (p) => { const r = store.setFlag(p.ids, p.field, p.value); updateBadge(); return r; },
   mark_all_read: (p) => { const r = store.markAllRead(p && p.source); updateBadge(); return r; },
-  get_config: () => config.load(),
-  estimate: (p) => estimateMonthlyCost({ ...config.load(), ...(p || {}) }),
-  usage: () => store.usage(),
+  get_config: () => currentConfig(),
+  estimate: (p) => { authorize('viewApiCosts'); return estimateMonthlyCost({ ...config.load(), ...(p || {}) }); },
+  usage: () => { authorize('viewApiCosts'); return store.usage(); },
   roster: () => loadRoster(),
 };
 
@@ -372,17 +387,17 @@ ipcMain.handle('backend', (_e, method, params) => {
 });
 ipcMain.handle('save-config', (_e, cfg) => {
   const before = config.load();
-  const saved = config.save({ ...before, ...cfg }, limits);
+  const saved = config.save(applySettings(before, cfg, currentRole()), limits);
   // 从关闭切回开启时，关闭期间错过的时间点不补抓，从现在开始重新计时
   if (!activeDays(before).length && activeDays(saved).length) writeLastAuto(Date.now());
   schedule();
-  return saved;
+  return visibleSettings(saved, currentRole());
 });
 ipcMain.handle('fetch-now', () => doFetch());
 ipcMain.handle('access-info', async () => {
   const m = accessMode();
   const info = { mode: m.mode, relayConfigured: Boolean(APP_CONFIG.relayUrl),
-    hasApiKey: APP_CONFIG.lab ? APP_CONFIG.role === 'owner' : Boolean(readApiKey()), limits };
+    hasApiKey: m.mode === 'direct', limits };
   if (m.mode === 'relay') {
     try {
       const s = await refreshLimits();
@@ -391,9 +406,13 @@ ipcMain.handle('access-info', async () => {
       info.error = e.message;
     }
   }
-  return info;
+  const identity = identityFor(currentRole());
+  if (!identity.permissions.viewMonthlyQuota) delete info.quota;
+  if (!identity.permissions.viewBalance) delete info.balance;
+  return { ...info, ...identity };
 });
 ipcMain.handle('set-access-code', async (_e, code) => {
+  authorize('configureAccessCode');
   if (APP_CONFIG.lab) throw new Error('请在验收面板切换身份，不能写入正式访问码');
   code = String(code || '').trim();
   if (!code) { writeAccess(null); schedule(); return { ok: true }; }
@@ -401,7 +420,7 @@ ipcMain.handle('set-access-code', async (_e, code) => {
   // 先验证再保存
   const client = new FeedClient({ mode: 'relay', relayUrl: APP_CONFIG.relayUrl, accessCode: code, fetchImpl: netFetch });
   const s = await client.status();
-  writeAccess(code);
+  writeAccess(code, verifiedMemberRole(s.plan));
   limits = s.limits || {};
   // 立即按新的限制修正已有配置（比如最短间隔）
   config.save(config.load(), limits);
@@ -409,6 +428,7 @@ ipcMain.handle('set-access-code', async (_e, code) => {
   return { ok: true, name: s.name, quota: s.quota, limits };
 });
 ipcMain.handle('set-api-key', (_e, key) => {
+  authorize('configureApi');
   if (APP_CONFIG.lab) throw new Error('真实预发 API Key 请在本地环境文件配置');
   writeApiKey(String(key || '').trim());
   if (readApiKey()) limits = {};

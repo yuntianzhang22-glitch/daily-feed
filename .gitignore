@@ -19,6 +19,7 @@ config.json
 relay/*.local.json
 relay/.dev.vars*
 !.env.staging.example
+!.env.owner.example
 # 本地生成的访问码 / 口令不入库
 *admin_token*
 *test_code*

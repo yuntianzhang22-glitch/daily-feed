@@ -12,6 +12,20 @@ const state = {
   fetching: false,
 };
 let labContext = { enabled: false };
+let identity = { role: 'guest', permissions: {} };
+
+function applyIdentity(info) {
+  identity = { role: info.role, permissions: info.permissions || {} };
+  const p = identity.permissions;
+  $('api-key-box').hidden = !p.configureApi;
+  $('api-key').disabled = !p.configureApi || labContext.enabled;
+  $('save-api-key').disabled = !p.configureApi || labContext.enabled;
+  $('access-code-row').hidden = !p.configureAccessCode || !info.relayConfigured;
+  $('keywords-box').hidden = !p.configureKeywords;
+  $('keywords').disabled = !p.configureKeywords;
+  $('estimate-panel').hidden = !p.viewApiCosts;
+  $('avg-posts-field').hidden = !p.viewApiCosts;
+}
 
 async function initLab() {
   labContext = await api.labInfo();
@@ -699,23 +713,19 @@ async function renderAccess() {
   setHint('access-hint', '正在检查…');
   const info = await api.accessInfo();
   accessLimits = info.limits || {};
-  const ownApi = info.mode === 'direct';
-  $('access-title').textContent = ownApi || !info.relayConfigured ? 'API 连接' : '访问码';
-  $('access-code-row').hidden = ownApi || !info.relayConfigured;
-  $('api-key-summary').textContent = ownApi ? '更换 API Key' : '管理员：使用自己的 twitterapi.io API Key';
-  $('api-key-box').hidden = labContext.enabled && ownApi;
+  applyIdentity(info);
+  const ownApi = identity.role === 'owner';
+  $('access-title').textContent = ownApi ? 'API 连接' : '访问码';
+  $('api-key-summary').textContent = '更换 API Key';
   if (ownApi) $('api-key-box').open = false;
-  // 中转只放行按关注的人搜索，关键词在中转模式下不可用
-  $('keywords-box').hidden = info.mode === 'relay';
-  $('key-hint').textContent = info.hasApiKey ? '已在本机加密保存' : '尚未设置';
+  $('key-hint').textContent = labContext.enabled ? 'API Key 由隔离验收环境提供' : info.hasApiKey ? '已在本机加密保存' : '尚未设置';
   updateEstimate();
   if (ownApi) {
     setHint('access-hint', '使用自己的 twitterapi.io API Key 直连。', 'ok');
     return;
   }
   if (!info.relayConfigured) {
-    setHint('access-hint', '这个版本没有配置中转服务，请使用 API Key。');
-    $('api-key-box').open = true;
+    setHint('access-hint', '尚未配置访问码服务，请联系管理员。', 'warn');
     return;
   }
   const maxDays = accessLimits.max_runs_per_week;
@@ -729,7 +739,7 @@ async function renderAccess() {
       `已连接（${info.name || '已验证'}，账号 ${info.account_no}）。余额 ¥${b.cny.toFixed(2)}，本月已花 ¥${(b.month_spent_cny || 0).toFixed(2)}。` +
       (low ? ` 余额快用完了，转账充值时请备注账号 ${info.account_no}。` : ''), low ? 'warn' : 'ok');
   } else if (info.mode === 'relay') {
-    const q = info.quota || {};
+    const q = identity.permissions.viewMonthlyQuota ? info.quota || {} : {};
     setHint('access-hint',
       `已连接（${info.name || '已验证'}${info.account_no ? `，账号 ${info.account_no}` : ''}，内测）。本月额度已用 ${usd(q.used_usd)} / ${usd(q.limit_usd)}` +
       (maxDays && maxDays < 7 ? `，每周最多抓 ${maxDays} 天` : '') + '。', 'ok');
@@ -778,9 +788,9 @@ function settingsForm() {
     schedule_time: timeValue(),
     max_per_target: Number($('max-per-target').value) || 0,
     search_mode: $('search-mode').value,
-    avg_posts_per_day: Number($('avg-posts').value) || 0,
     include_replies: $('include-replies').checked,
-    keywords: lines($('keywords').value),
+    ...(identity.permissions.configureKeywords ? { keywords: lines($('keywords').value) } : {}),
+    ...(identity.permissions.viewApiCosts ? { avg_posts_per_day: Number($('avg-posts').value) || 0 } : {}),
   };
 }
 
@@ -789,6 +799,7 @@ const updateEstimate = debounce(async () => {
   const maxDays = accessLimits.max_runs_per_week;
   $('schedule-hint').textContent = scheduleSummary(cfg.schedule_enabled, cfg.schedule_days, cfg.schedule_time) +
     (cfg.schedule_enabled && maxDays && cfg.schedule_days.length > maxDays ? `。你的额度每周最多 ${maxDays} 天，保存时只保留前 ${maxDays} 天` : '');
+  if (!identity.permissions.viewApiCosts) return;
   const [e, used] = await Promise.all([api.estimate(cfg), api.usage()]);
   const extra = e.keywords_high || 0;
   $('est-expected').textContent = usd(e.expected + extra);
@@ -1011,6 +1022,11 @@ function renderFollowList() {
 }
 
 const updateFollowsCost = debounce(async () => {
+  if (!identity.permissions.viewApiCosts) {
+    const max = accessLimits.max_follows;
+    $('follows-cost').textContent = `已选择 ${followDraft.length} 人` + (max ? `，最多可关注 ${max} 人。` : '。');
+    return;
+  }
   const cfg = { ...(await api.getConfig()), follows: followDraft };
   const e = await api.estimate(cfg);
   $('follows-cost').textContent = e.people
@@ -1181,6 +1197,7 @@ $('cancel-follows').addEventListener('click', () => $('follows-dialog').close())
   await refreshSidebar();
   await loadFeed(true);
   const [info, status] = await Promise.all([api.accessInfo(), api.status()]);
+  applyIdentity(info);
   accessLimits = info.limits || {};
   if (info.mode === 'none') {
     setStatus('请先在设置里填写访问码', true);

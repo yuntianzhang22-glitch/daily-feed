@@ -54,6 +54,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .lab-panel .btn { width: 100%; margin-top: 8px; }
 .lab-panel p { margin: 6px 0 0; font-size: 12px; }
 .search-row[hidden] { display: none; }
+#api-key-box[hidden], #keywords-box[hidden], #avg-posts-field[hidden], #estimate-panel[hidden] { display: none; }
 
 nav { flex: 1; overflow-y: auto; }
 

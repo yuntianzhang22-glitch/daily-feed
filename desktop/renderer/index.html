@@ -90,11 +90,11 @@
           <button class="btn" type="button" id="save-access">验证并保存</button>
         </div>
         <p class="hint" id="access-hint"></p>
-        <details id="api-key-box">
+        <details id="api-key-box" hidden>
           <summary id="api-key-summary">使用自己的 twitterapi.io API Key</summary>
           <div class="search-row">
-            <input type="password" id="api-key" autocomplete="off" placeholder="已保存则留空不变" aria-label="API Key" />
-            <button class="btn" type="button" id="save-api-key">保存</button>
+            <input type="password" id="api-key" autocomplete="off" placeholder="已保存则留空不变" aria-label="API Key" disabled />
+            <button class="btn" type="button" id="save-api-key" disabled>保存</button>
           </div>
           <p class="hint" id="key-hint"></p>
         </details>
@@ -159,7 +159,7 @@
             <option value="Latest">时间优先</option>
           </select>
         </label>
-        <label>
+        <label id="avg-posts-field" hidden>
           估算用：每人每天平均发帖（条）
           <input type="number" id="avg-posts" min="0" max="100" step="0.5" />
         </label>
@@ -167,14 +167,14 @@
       <label class="checkbox">
         <input type="checkbox" id="include-replies" /> 包含回复
       </label>
-      <details id="keywords-box">
+      <details id="keywords-box" hidden>
         <summary>高级：额外关键词（仅 API Key 直连可用）</summary>
         <label>
           每行一个，支持 X 高级搜索语法，如 "Claude Code" lang:en
           <textarea id="keywords" rows="3" spellcheck="false"></textarea>
         </label>
       </details>
-      <section class="estimate" aria-labelledby="estimate-title">
+      <section class="estimate" id="estimate-panel" aria-labelledby="estimate-title" hidden>
         <h3 id="estimate-title">月度费用预估</h3>
         <div class="estimate-grid">
           <div><span class="label">预计</span><strong id="est-expected">-</strong></div>
