@@ -385,6 +385,11 @@ progress { width: 100%; height: 6px; accent-color: var(--accent); }
   border-color: var(--accent); color: var(--accent); font-weight: 600;
 }
 .update-banner:hover { background: #10202d; }
+.update-dialog { width: min(440px, 92vw); }
+.update-dialog h2, .update-dialog p { margin: 0; }
+#update-dialog-version { font-size: 15px; line-height: 1.6; }
+#update-dialog-notes { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; overflow-y: auto; }
+.update-dialog .dialog-actions { margin-top: 8px; }
 
 /* ---------- 定时抓取开关 */
 

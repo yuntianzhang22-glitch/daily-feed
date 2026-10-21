@@ -1,9 +1,16 @@
 // 启动实际主进程、preload 和渲染页面，验证 IPC、身份切换和界面；不用真实账号。
-const { app, BrowserWindow, clipboard } = require('electron');
+const { app, BrowserWindow, clipboard, safeStorage } = require('electron');
 const assert = require('node:assert/strict');
 const { localCode } = require('../desktop/core/environment');
 let copiedAccount;
 clipboard.writeText = (text) => { copiedAccount = text; };
+// 测试进程只存本地样例 Key；替换钥匙串 OS 边界，避免无人值守验收被授权弹窗阻塞。
+safeStorage.isEncryptionAvailable = () => true;
+safeStorage.encryptString = (text) => Buffer.from('smoke-test:' + text);
+safeStorage.decryptString = (buffer) => {
+  assert.ok(buffer.toString().startsWith('smoke-test:'));
+  return buffer.toString().slice('smoke-test:'.length);
+};
 require('../desktop/main');
 
 const timeout = setTimeout(() => { console.error('UI smoke timeout'); app.exit(1); }, 45000);

@@ -20,6 +20,7 @@
         <label for="lab-scenario">账号状态</label>
         <select id="lab-scenario"></select>
         <button id="lab-copy-account" class="btn" type="button" hidden>复制样例登录账号</button>
+        <button id="lab-preview-update" class="btn" type="button">模拟更新提醒</button>
         <button id="lab-topup" class="btn" type="button" hidden>模拟转账充值 ¥10</button>
         <p id="lab-message" class="hint" role="status" aria-live="polite"></p>
       </section>
@@ -210,6 +211,23 @@
         <button class="btn primary" id="save-settings" value="save">保存</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="update-dialog" class="update-dialog" aria-labelledby="update-dialog-title" aria-describedby="update-dialog-version update-dialog-detail update-dialog-help">
+    <div class="dialog-body">
+      <h2 id="update-dialog-title">发现新版本</h2>
+      <p id="update-dialog-version"></p>
+      <p id="update-dialog-detail" class="hint"></p>
+      <p id="update-dialog-notes" class="hint" hidden></p>
+      <p id="update-dialog-help" class="hint">更新会下载新版并重启应用，配置、关注、收藏和帖子记录都会保留。</p>
+      <progress id="update-dialog-progress" aria-label="更新下载进度" hidden></progress>
+      <p id="update-dialog-status" class="hint" role="status" aria-live="polite" hidden></p>
+      <p id="update-dialog-error" class="error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="btn" type="button" id="update-later" autofocus>稍后</button>
+        <button class="btn primary" type="button" id="update-now">立即更新</button>
+      </div>
+    </div>
   </dialog>
 
   <dialog id="viewer" class="viewer" aria-label="查看图片和视频">

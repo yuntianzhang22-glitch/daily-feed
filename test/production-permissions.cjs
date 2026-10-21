@@ -25,6 +25,7 @@ app.whenReady().then(async () => {
     await assert.rejects(run('api.setApiKey("cannot-create-owner")'), /权限不足/);
     await assert.rejects(run('api.labProfile({role:"owner",scenario:"normal"})'), /正式环境不开放/);
     await assert.rejects(run('api.labCopyAccount()'), /正式环境不开放/);
+    await assert.rejects(run('api.labPreviewUpdate()'), /正式环境不开放/);
     await assert.rejects(run('api.saveConfig({role:"owner"})'), /权限不足/);
     assert.ok(!fs.existsSync(path.join(dir, 'api_key.bin')));
     assert.equal((await run('api.accessInfo()')).role, 'guest');

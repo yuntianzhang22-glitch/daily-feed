@@ -53,7 +53,7 @@ test('所有环境、身份和状态使用不同目录，验收不使用正式�
   for (const environment of ['test', 'staging']) for (const [role, scenarios] of Object.entries(SCENARIOS)) for (const scenario of Object.keys(scenarios)) {
     const runtime = resolveEnvironment({ env: { DAILY_FEED_ENV: environment, DAILY_FEED_LAB_URL: 'http://127.0.0.1:1234', DAILY_FEED_LAB_TOKEN: 't', DAILY_FEED_ROLE: role, DAILY_FEED_SCENARIO: scenario, DAILY_FEED_RELAY: appConfig.relayUrl, DAILY_FEED_MANIFEST: appConfig.updateManifestUrl }, appConfig, localRoot: '/tmp/df' });
     assert.equal(runtime.relayUrl, 'http://127.0.0.1:1234');
-    assert.equal(runtime.updateManifestUrl, '');
+    assert.equal(runtime.updateManifestUrl, 'http://127.0.0.1:1234/v1/latest');
     dirs.push(runtime.dataPath);
   }
   assert.equal(new Set(dirs).size, dirs.length);

@@ -29,6 +29,7 @@ export async function startLab({ root, environment, port = 0, liveApiKey = '' })
   const kvFile = path.join(dir, 'public.json');
   const kv = fs.existsSync(kvFile) ? JSON.parse(fs.readFileSync(kvFile, 'utf8')) : {};
   kv['public:roster.json'] = fs.readFileSync(new URL('../desktop/roster.json', import.meta.url), 'utf8');
+  const currentVersion = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
   const env = {
     ADMIN_TOKEN: token, TWITTERAPI_KEY: liveApiKey || fixtureKey,
     ACCESS: {
@@ -82,6 +83,15 @@ export async function startLab({ root, environment, port = 0, liveApiKey = '' })
         size += chunk.length;
         if (size > 65536) { res.writeHead(413); res.end(); return; }
         chunks.push(chunk);
+      }
+      // 默认没有新版本；发布本地演示清单后，走与正式版相同的 Worker 更新检查。
+      if (!kv['public:latest.json']) kv['public:latest.json'] = JSON.stringify({ version: currentVersion,
+        url: `${origin}/fixtures/update-preview.zip`, sha256: '0'.repeat(64), notes: '' });
+      // 预览仅验证提醒和失败重试，不提供可安装包。
+      if (url.pathname === '/fixtures/update-preview.zip') {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ message: '本地演示不包含安装包' }));
+        return;
       }
       const request = new Request(url, {
         method: req.method, headers: req.headers,

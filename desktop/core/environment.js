@@ -48,7 +48,7 @@ function resolveEnvironment({ env = process.env, packaged = false, developmentRu
   return {
     name, label: name === 'test' ? '测试环境' : '预发环境', lab: true, root, role, scenario,
     live: env.DAILY_FEED_LIVE === '1', relayUrl,
-    updateManifestUrl: '', rosterUrl: `${relayUrl}/v1/roster`,
+    updateManifestUrl: `${relayUrl}/v1/latest`, rosterUrl: `${relayUrl}/v1/roster`,
     dataPath: profilePath(root, name, role, scenario),
   };
 }

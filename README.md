@@ -16,6 +16,7 @@ xattr -dr com.apple.quarantine "/Applications/Daily Feed.app"
 5. 点「关注」，从内置名单里勾选想看的人
 
 之后的版本在应用内更新，配置、关注列表和帖子记录都会保留。数据存在 `~/Library/Application Support/Daily Feed/`。
+启动约 5 秒后会检查更新，发现新版时弹出提醒；可立即更新或稍后，稍后仍可从侧栏或设置打开更新入口。
 
 ## 多设备登录
 

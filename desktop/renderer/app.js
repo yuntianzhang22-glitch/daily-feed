@@ -48,6 +48,13 @@ async function initLab() {
   for (const [value, label] of Object.entries(labContext.scenarios[labContext.role])) $('lab-scenario').append(el('option', { value, text: label }));
   $('lab-scenario').value = labContext.scenario;
   $('lab-copy-account').hidden = false;
+  $('lab-preview-update').addEventListener('click', async () => {
+    try {
+      await api.labPreviewUpdate();
+      $('lab-message').textContent = '本地演示更新已就绪，可验收稍后、下载失败及重试。';
+      showUpdatePrompt(true);
+    } catch (e) { $('lab-message').textContent = errText(e); }
+  });
   $('lab-copy-account').addEventListener('click', async () => {
     try {
       await api.labCopyAccount();
@@ -711,6 +718,7 @@ async function openSettings() {
   $('access-code').value = '';
   $('api-key').value = '';
   $('update-text').textContent = `当前版本 ${status.version}`;
+  if (updateInfo) renderUpdate(updateInfo, false);
   $('settings').showModal();
   updateEstimate();
   renderAccess();
@@ -1096,8 +1104,11 @@ async function saveFollows() {
 // ---- 更新
 
 let updateInfo = null;
+let updateInstalling = false;
+const promptedVersions = new Set();
 
-function renderUpdate(info) {
+function renderUpdate(info, prompt = true) {
+  if (updateInstalling) return;
   updateInfo = info;
   const banner = $('update-banner');
   if (info && info.available) {
@@ -1107,6 +1118,7 @@ function renderUpdate(info) {
       (info.size ? `（${(info.size / 1048576).toFixed(0)} MB）` : '');
     $('update-notes').textContent = info.notes || '';
     $('install-update').hidden = false;
+    if (prompt) showUpdatePrompt();
   } else {
     banner.hidden = true;
     $('install-update').hidden = true;
@@ -1114,7 +1126,26 @@ function renderUpdate(info) {
     if (info && info.error) $('update-text').textContent = `检查更新失败：${info.error}`;
     else if (info && info.configured === false) $('update-text').textContent = `当前版本 ${info.current || ''}（这个版本没有配置更新地址）`;
     else if (info) $('update-text').textContent = `当前版本 ${info.current}，已是最新`;
+    $('update-dialog').close();
   }
+}
+
+function showUpdatePrompt(force = false) {
+  if (updateInstalling || !updateInfo?.available) return;
+  const dialog = $('update-dialog');
+  if (!force && !dialog.open && promptedVersions.has(updateInfo.latest)) return;
+  promptedVersions.add(updateInfo.latest);
+  $('update-dialog-title').textContent = '发现新版本';
+  $('update-dialog-version').textContent = `Daily Feed ${updateInfo.latest} 已可用`;
+  $('update-dialog-detail').textContent = `当前版本 ${updateInfo.current}` +
+    (updateInfo.size ? ` · 下载大小 ${(updateInfo.size / 1048576).toFixed(0)} MB` : '');
+  $('update-dialog-notes').textContent = updateInfo.notes || '';
+  $('update-dialog-notes').hidden = !updateInfo.notes;
+  $('update-dialog-error').hidden = true;
+  $('update-dialog-status').hidden = true;
+  $('update-dialog-progress').hidden = true;
+  $('update-now').textContent = '立即更新';
+  if (!dialog.open) dialog.showModal();
 }
 
 async function checkUpdate() {
@@ -1122,7 +1153,8 @@ async function checkUpdate() {
   btn.disabled = true;
   btn.textContent = '检查中…';
   try {
-    renderUpdate(await api.checkUpdate());
+    renderUpdate(await api.checkUpdate(), false);
+    showUpdatePrompt(true);
   } finally {
     btn.disabled = false;
     btn.textContent = '检查更新';
@@ -1130,18 +1162,35 @@ async function checkUpdate() {
 }
 
 async function installUpdate() {
-  if (!updateInfo || !updateInfo.available) return;
-  const ok = confirm(`安装 ${updateInfo.latest}？\n\n应用会下载新版、自动退出并重新打开，大约需要一分钟。配置和帖子记录都会保留。`);
-  if (!ok) return;
+  if (updateInstalling || !updateInfo?.available) return;
+  updateInstalling = true;
   $('install-update').disabled = true;
   $('update-banner').disabled = true;
+  $('update-now').disabled = true;
+  $('update-later').disabled = true;
+  $('update-now').textContent = '正在更新…';
+  $('update-dialog-error').hidden = true;
+  $('update-dialog-progress').hidden = false;
+  $('update-dialog-progress').removeAttribute('value');
+  $('update-dialog-status').hidden = false;
+  $('update-dialog-status').textContent = '正在下载更新…';
   $('update-progress').hidden = false;
   $('update-text').textContent = '正在下载更新…';
   try {
     await api.installUpdate();
     $('update-text').textContent = '下载完成，正在重启…';
+    $('update-dialog-status').textContent = '下载完成，正在重启…';
   } catch (err) {
-    $('update-text').textContent = `更新失败：${errText(err)}`;
+    const message = `更新失败：${errText(err)}`;
+    $('update-text').textContent = message;
+    $('update-dialog-error').textContent = message;
+    $('update-dialog-error').hidden = false;
+    $('update-dialog-status').hidden = true;
+    $('update-dialog-progress').hidden = true;
+    $('update-now').disabled = false;
+    $('update-later').disabled = false;
+    $('update-now').textContent = '重试';
+    updateInstalling = false;
     $('install-update').disabled = false;
     $('update-banner').disabled = false;
     $('update-progress').hidden = true;
@@ -1193,10 +1242,15 @@ api.onEvent(async ({ channel, data }) => {
   } else if (channel === 'update_status') {
     renderUpdate(data);
   } else if (channel === 'update_progress') {
-    const p = $('update-progress');
-    if (data.total) { p.max = data.total; p.value = data.received; }
-    $('update-text').textContent = `正在下载更新… ${(data.received / 1048576).toFixed(0)} MB` +
+    for (const id of ['update-progress', 'update-dialog-progress']) {
+      const p = $(id);
+      if (data.total) { p.max = data.total; p.value = data.received; }
+      else p.removeAttribute('value');
+    }
+    const message = `正在下载更新… ${(data.received / 1048576).toFixed(0)} MB` +
       (data.total ? ` / ${(data.total / 1048576).toFixed(0)} MB` : '');
+    $('update-text').textContent = message;
+    $('update-dialog-status').textContent = message;
   }
 });
 
@@ -1231,11 +1285,11 @@ $('use-cloud-api').addEventListener('click', async () => {
 });
 $('save-api-key').addEventListener('click', saveApiKey);
 $('check-update').addEventListener('click', checkUpdate);
-$('install-update').addEventListener('click', installUpdate);
-$('update-banner').addEventListener('click', async () => {
-  await openSettings();
-  installUpdate();
-});
+$('install-update').addEventListener('click', () => showUpdatePrompt(true));
+$('update-banner').addEventListener('click', () => showUpdatePrompt(true));
+$('update-now').addEventListener('click', installUpdate);
+$('update-later').addEventListener('click', () => $('update-dialog').close());
+$('update-dialog').addEventListener('cancel', (event) => { if (updateInstalling) event.preventDefault(); });
 $('reveal-data').addEventListener('click', () => api.revealData());
 $('follows-btn').addEventListener('click', openFollows);
 $('roster-query').addEventListener('input', debounce(renderRoster, 100));

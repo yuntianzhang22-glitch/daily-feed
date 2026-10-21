@@ -9,6 +9,8 @@ import profiles from '../desktop/core/environment.js';
 
 const require = createRequire(import.meta.url);
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'daily-feed-login-'));
+// 正式入口测试由 Electron CLI 启动，OS 版本号可能是运行时版本；样例始终高于两者。
+const nextVersion = '999.0.0';
 async function device(lab, environment, code, account, phase, directory, balance) {
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('DAILY_FEED_') && key !== 'ELECTRON_RUN_AS_NODE'));
   Object.assign(env, {
@@ -44,6 +46,14 @@ try {
       if (role === 'paid') lab.ledger.topup(account.account_no, 10, '验收模拟到账');
       await device(lab, environment, code, account, 'restart', deviceA, 40);
       await device(lab, environment, code, account, 'second', deviceB, 40);
+      // 从真实本地 Worker 发布更新，再由启动计时器触发实际页面弹窗。
+      await fetch(`${lab.url}/admin/publish/latest.json`, { method: 'POST',
+        headers: { Authorization: `Bearer ${lab.token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ version: nextVersion, url: `${lab.url}/fixtures/update-preview.zip`,
+          sha256: '0'.repeat(64), size: 128 * 1048576,
+          notes: '改善阅读体验。<img src=x onerror=alert(1)>' }),
+      }).then((r) => { if (!r.ok) throw new Error('验收更新发布失败'); });
+      await device(lab, environment, code, account, 'update', deviceA, 40);
       // 重启本地 Worker 及客户端，退出状态仍不能被自动注入的样例身份覆盖。
       await lab.close();
       labClosed = true;

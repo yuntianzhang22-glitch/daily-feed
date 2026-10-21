@@ -152,7 +152,9 @@ function writeApiKey(key) {
 function accessMode() {
   if (fs.existsSync(P.signedOut())) return { mode: 'none' };
   const saved = readAccess();
-  const access = resolveAccess({ apiKey: readApiKey(), relayUrl: APP_CONFIG.relayUrl, accessCode: saved.code, preferAccount: saved.accountLogin });
+  const preferAccount = saved.accountLogin && APP_CONFIG.relayUrl && saved.code;
+  // 云端账号无需解密本机 Key，避免更新后因无关的钥匙串授权阻塞启动和更新检查。
+  const access = resolveAccess({ apiKey: preferAccount ? null : readApiKey(), relayUrl: APP_CONFIG.relayUrl, accessCode: saved.code, preferAccount: saved.accountLogin });
   // 只替换验收上游地址，账号与权限判断不因测试环境而改变。
   if (APP_CONFIG.lab && access.mode === 'direct') access.directBase = process.env.DAILY_FEED_LAB_DIRECT_BASE;
   return access;
@@ -334,6 +336,11 @@ function initUpdater() {
     currentVersion: app.getVersion(),
     fetchImpl: netFetch,
     workDir: path.join(app.getPath('temp'), 'daily-feed-update'),
+    ...(APP_CONFIG.lab ? {
+      workDir: path.join(app.getPath('temp'), `daily-feed-${APP_CONFIG.name}-update-${process.pid}`),
+      bundleId: `local.dailyfeed.${APP_CONFIG.name}`,
+      allowedDownloadOrigin: new URL(APP_CONFIG.relayUrl).origin,
+    } : {}),
     onProgress: (p) => sendToUi('update_progress', p),
   });
 }
@@ -391,6 +398,18 @@ ipcMain.handle('lab-copy-account', () => {
   if (!APP_CONFIG.lab) throw new Error('正式环境不开放验收控制');
   clipboard.writeText(localCode(APP_CONFIG.name, APP_CONFIG.role, APP_CONFIG.scenario));
   return { ok: true };
+});
+ipcMain.handle('lab-preview-update', async () => {
+  if (!APP_CONFIG.lab) throw new Error('正式环境不开放验收控制');
+  const version = app.getVersion().split('.').map(Number);
+  version[2] += 1;
+  const response = await netFetch(`${APP_CONFIG.relayUrl}/admin/publish/latest.json`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.DAILY_FEED_LAB_TOKEN}` },
+    body: JSON.stringify({ version: version.join('.'), notes: '改善阅读体验和稳定性。关注、收藏与阅读记录保留。',
+      url: `${APP_CONFIG.relayUrl}/fixtures/update-preview.zip`, sha256: '0'.repeat(64), size: 128 * 1048576 }),
+  });
+  if (!response.ok) throw new Error('准备演示更新失败');
+  return checkForUpdate();
 });
 ipcMain.handle('lab-profile', async (_e, { role, scenario }) => {
   if (!APP_CONFIG.lab) throw new Error('正式环境不开放验收控制');

@@ -433,3 +433,16 @@ test('更新：校验值不对的下载会被丢弃', async () => {
   await assert.rejects(u.download({ version: '0.2.0', url: 'https://x/a.zip', sha256: 'c'.repeat(64) }), /校验失败/);
   assert.ok(!fs.existsSync(path.join(workDir, 'update.zip')));
 });
+
+test('验收更新只接受自己的本机下载地址，不能下载正式包或另一环境的包', async () => {
+  const local = 'http://127.0.0.1:8791';
+  for (const origin of ['https://github.com', 'http://127.0.0.1:8792']) {
+    const manifest = { version: '1.0.0', url: `${origin}/update.zip`, sha256: 'a'.repeat(64) };
+    let requests = 0;
+    const u = new Updater({ manifestUrl: `${local}/v1/latest`, currentVersion: '0.9.0', allowedDownloadOrigin: local,
+      fetchImpl: async () => { requests++; return new Response(JSON.stringify(manifest)); } });
+    await assert.rejects(u.check(), /当前隔离环境/);
+    await assert.rejects(u.download(manifest), /当前隔离环境/);
+    assert.strictEqual(requests, 1);
+  }
+});

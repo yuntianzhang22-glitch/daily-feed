@@ -54,20 +54,31 @@ function currentBundlePath(execPath = process.execPath) {
 }
 
 class Updater {
-  constructor({ manifestUrl, currentVersion, fetchImpl = fetch, workDir, onProgress = () => {} }) {
+  constructor({ manifestUrl, currentVersion, fetchImpl = fetch, workDir, onProgress = () => {}, bundleId = BUNDLE_ID, allowedDownloadOrigin }) {
     this.manifestUrl = manifestUrl;
     this.currentVersion = currentVersion;
     this.fetch = fetchImpl;
     this.workDir = workDir || path.join(os.tmpdir(), 'daily-feed-update');
     this.onProgress = onProgress;
     this.staged = null;
+    this.bundleId = bundleId;
+    this.allowedDownloadOrigin = allowedDownloadOrigin;
+  }
+
+  validateDownload(manifest) {
+    validateManifest(manifest);
+    if (this.allowedDownloadOrigin && new URL(manifest.url).origin !== this.allowedDownloadOrigin) {
+      throw new Error('验收更新只能使用当前隔离环境的下载地址');
+    }
+    return manifest;
   }
 
   async check() {
     if (!this.manifestUrl) return { available: false, reason: '未配置更新地址' };
-    const res = await this.fetch(this.manifestUrl, { signal: AbortSignal.timeout(15000), cache: 'no-store' });
+    const res = await this.fetch(this.manifestUrl, { signal: AbortSignal.timeout(15000), cache: 'no-store',
+      ...(this.allowedDownloadOrigin ? { redirect: 'error' } : {}) });
     if (!res.ok) throw new Error(`检查更新失败（${res.status}）`);
-    const m = validateManifest(await res.json());
+    const m = this.validateDownload(await res.json());
     return {
       available: compareVersions(m.version, this.currentVersion) > 0,
       current: this.currentVersion,
@@ -80,12 +91,13 @@ class Updater {
 
   // 下载并校验，成功后返回解压好的新 .app 路径
   async download(manifest) {
-    validateManifest(manifest);
+    this.validateDownload(manifest);
     fs.rmSync(this.workDir, { recursive: true, force: true });
     fs.mkdirSync(this.workDir, { recursive: true });
     const zipPath = path.join(this.workDir, 'update.zip');
 
-    const res = await this.fetch(manifest.url, { signal: AbortSignal.timeout(10 * 60 * 1000) });
+    const res = await this.fetch(manifest.url, { signal: AbortSignal.timeout(10 * 60 * 1000),
+      ...(this.allowedDownloadOrigin ? { redirect: 'error' } : {}) });
     if (!res.ok || !res.body) throw new Error(`下载失败（${res.status}）`);
     const total = Number(res.headers.get('content-length')) || Number(manifest.size) || 0;
     const hash = crypto.createHash('sha256');
@@ -114,7 +126,7 @@ class Updater {
     // 再确认一次包里的版本和 Bundle ID，防止装错包
     const plist = path.join(newApp, 'Contents', 'Info.plist');
     const info = JSON.parse(await run('/usr/bin/plutil', ['-convert', 'json', '-o', '-', plist]));
-    if (info.CFBundleIdentifier !== BUNDLE_ID) throw new Error('更新包的应用标识不匹配');
+    if (info.CFBundleIdentifier !== this.bundleId) throw new Error('更新包的应用标识不匹配');
     if (info.CFBundleShortVersionString !== manifest.version) throw new Error('更新包的版本号与清单不一致');
     await run('/usr/bin/codesign', ['--verify', '--deep', '--strict', newApp]);
     // 万一被打上了隔离标记也去掉，避免更新后被 Gatekeeper 拦下
