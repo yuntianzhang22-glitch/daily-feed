@@ -20,7 +20,12 @@ function applyIdentity(info) {
   $('api-key-box').hidden = !p.configureApi;
   $('api-key').disabled = !p.configureApi || labContext.enabled;
   $('save-api-key').disabled = !p.configureApi || labContext.enabled;
-  $('access-code-row').hidden = !p.configureAccessCode || !info.relayConfigured;
+  const member = p.configureAccessCode && info.relayConfigured;
+  $('access-code-row').hidden = !member || info.mode === 'relay';
+  $('account-actions').hidden = !member || info.mode !== 'relay';
+  $('account-help').hidden = !member;
+  $('copy-account').disabled = Boolean(labContext.enabled);
+  $('logout-account').disabled = Boolean(labContext.enabled);
   $('keywords-box').hidden = !p.configureKeywords;
   $('keywords').disabled = !p.configureKeywords;
   $('estimate-panel').hidden = !p.viewApiCosts;
@@ -716,7 +721,12 @@ async function renderAccess() {
   accessLimits = info.limits || {};
   applyIdentity(info);
   const ownApi = identity.role === 'owner';
-  $('access-title').textContent = ownApi ? 'API 连接' : '访问码';
+  $('access-title').textContent = ownApi ? 'API 连接' : '账号登录';
+  $('account-help').textContent = labContext.enabled
+    ? '当前为本地验收账号，请用验收面板切换身份。'
+    : info.mode === 'relay'
+      ? '登录状态已保存在本机。复制完整登录账号，在其他设备输入一次即可登录。登录账号请私下保管；DF- 开头的短编号仅用于充值备注。本机的关注、收藏和阅读记录暂不同步。'
+      : '只需登录账号，无需密码或额外访问码。原访问码可直接作为登录账号使用；充值备注用的 DF- 短编号不能登录。';
   $('api-key-summary').textContent = '更换 API Key';
   if (ownApi) $('api-key-box').open = false;
   $('key-hint').textContent = labContext.enabled ? 'API Key 由隔离验收环境提供' : info.hasApiKey ? '已在本机加密保存' : '尚未设置';
@@ -726,7 +736,7 @@ async function renderAccess() {
     return;
   }
   if (!info.relayConfigured) {
-    setHint('access-hint', '尚未配置访问码服务，请联系管理员。', 'warn');
+    setHint('access-hint', '尚未配置账号服务，请联系管理员。', 'warn');
     return;
   }
   const maxDays = accessLimits.max_runs_per_week;
@@ -737,15 +747,15 @@ async function renderAccess() {
     const b = info.balance || { cny: 0 };
     const low = b.cny < 1;
     setHint('access-hint',
-      `已连接（${info.name || '已验证'}，账号 ${info.account_no}）。余额 ¥${b.cny.toFixed(2)}，本月已花 ¥${(b.month_spent_cny || 0).toFixed(2)}。` +
+      `已登录（${info.name || '已验证'}，充值编号 ${info.account_no}）。余额 ¥${b.cny.toFixed(2)}，本月已花 ¥${(b.month_spent_cny || 0).toFixed(2)}。` +
       (low ? ` 余额快用完了，转账充值时请备注账号 ${info.account_no}。` : ''), low ? 'warn' : 'ok');
   } else if (info.mode === 'relay') {
     const q = identity.permissions.viewMonthlyQuota ? info.quota || {} : {};
     setHint('access-hint',
-      `已连接（${info.name || '已验证'}${info.account_no ? `，账号 ${info.account_no}` : ''}，内测）。本月额度已用 ${usd(q.used_usd)} / ${usd(q.limit_usd)}` +
+      `已登录（${info.name || '已验证'}${info.account_no ? `，编号 ${info.account_no}` : ''}，内测）。本月额度已用 ${usd(q.used_usd)} / ${usd(q.limit_usd)}` +
       (maxDays && maxDays < 7 ? `，每周最多抓 ${maxDays} 天` : '') + '。', 'ok');
   } else {
-    setHint('access-hint', '还没有填写访问码。向管理员要一个，粘贴到上面。', 'warn');
+    setHint('access-hint', '向管理员领取登录账号，粘贴后即可登录；下次打开自动沿用。', 'warn');
   }
 }
 
@@ -767,6 +777,27 @@ async function saveAccessCode() {
   } finally {
     btn.disabled = false;
   }
+}
+
+async function copyLoginAccount() {
+  try {
+    await api.copyLoginAccount();
+    setHint('access-hint', '登录账号已复制，可在你的其他设备上粘贴登录。请勿公开分享。', 'ok');
+  } catch (err) { setHint('access-hint', errText(err), 'warn'); }
+}
+
+async function logoutAccount() {
+  if (!confirm('退出后需重新输入完整登录账号。本机帖子、关注和收藏会保留。确定退出？')) return;
+  const btn = $('logout-account');
+  btn.disabled = true;
+  try {
+    await api.setAccessCode('');
+    await renderAccess();
+    settingsCfg = await api.getConfig();
+    loadSchedule(settingsCfg);
+    $('access-code').focus();
+  } catch (err) { setHint('access-hint', errText(err), 'warn'); }
+  finally { btn.disabled = Boolean(labContext.enabled); }
 }
 
 async function saveApiKey() {
@@ -1178,6 +1209,8 @@ initSchedulePickers();
 initViewer();
 $('save-access').addEventListener('click', saveAccessCode);
 $('access-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); saveAccessCode(); } });
+$('copy-account').addEventListener('click', copyLoginAccount);
+$('logout-account').addEventListener('click', logoutAccount);
 $('save-api-key').addEventListener('click', saveApiKey);
 $('check-update').addEventListener('click', checkUpdate);
 $('install-update').addEventListener('click', installUpdate);
@@ -1201,7 +1234,7 @@ $('cancel-follows').addEventListener('click', () => $('follows-dialog').close())
   applyIdentity(info);
   accessLimits = info.limits || {};
   if (info.mode === 'none') {
-    setStatus('请先在设置里填写访问码', true);
+    setStatus('请先在设置里登录账号', true);
     openSettings();
   } else {
     state.nextRun = status.next;

@@ -1,6 +1,6 @@
 // Electron 主进程：窗口、抓取（进程内 Node 后端）、定时、通知、访问码、内置名单、应用内更新。
 const {
-  app, BrowserWindow, dialog, ipcMain, net, Notification, powerMonitor, safeStorage, shell,
+  app, BrowserWindow, clipboard, dialog, ipcMain, net, Notification, powerMonitor, safeStorage, shell,
 } = require('electron');
 const fs = require('fs');
 const path = require('path');
@@ -198,7 +198,7 @@ async function doFetch() {
   if (fetching) return { started: false, reason: 'busy' };
   const mode = accessMode();
   if (mode.mode === 'none') {
-    onFetchDone({ ok: false, error: '还没有填写访问码，请在设置里填写' });
+    onFetchDone({ ok: false, error: '尚未登录，请在设置里填写登录账号' });
     return { started: false };
   }
   const cfg = fetchSettings(config.load(), currentRole());
@@ -219,7 +219,7 @@ async function doFetch() {
       const preview = Object.values(results).flatMap((v) => v.slice(0, 3))
         .slice(0, 3).map((t) => ({ author: (t.author || {}).userName, text: (t.text || '').slice(0, 120) }));
       // 访问码失效或额度用尽属于整体失败
-      const fatal = errors.find((e) => /访问码|额度|余额/.test(e.message));
+      const fatal = errors.find((e) => /登录账号|访问码|额度|余额/.test(e.message));
       onFetchDone(fatal && !total
         ? { ok: false, error: fatal.message, quota: client.quota }
         : { ok: true, new: total, errors, preview, credits: client.creditsUsed, quota: client.quota });
@@ -421,9 +421,10 @@ ipcMain.handle('access-info', async () => {
 });
 ipcMain.handle('set-access-code', async (_e, code) => {
   authorize('configureAccessCode');
-  if (APP_CONFIG.lab) throw new Error('请在验收面板切换身份，不能写入正式访问码');
+  if (APP_CONFIG.lab) throw new Error('请在验收面板切换身份，不能修改正式登录账号');
+  if (fetching) throw new Error('请等待当前抓取完成后再登录或退出');
   code = String(code || '').trim();
-  if (!code) { writeAccess(null); schedule(); return { ok: true }; }
+  if (!code) { writeAccess(null); limits = {}; schedule(); return { ok: true }; }
   if (!APP_CONFIG.relayUrl) throw new Error('这个版本没有配置中转服务');
   // 先验证再保存
   const client = new FeedClient({ mode: 'relay', relayUrl: APP_CONFIG.relayUrl, accessCode: code, fetchImpl: netFetch });
@@ -434,6 +435,15 @@ ipcMain.handle('set-access-code', async (_e, code) => {
   config.save(config.load(), limits);
   schedule();
   return { ok: true, name: s.name, quota: s.quota, limits };
+});
+// 登录账号本身是私密凭证。只在用户主动复制时写入剪贴板，不传回页面或状态接口。
+ipcMain.handle('copy-login-account', () => {
+  authorize('configureAccessCode');
+  if (APP_CONFIG.lab) throw new Error('验收账号只用于本地测试，不能复制为正式登录账号');
+  const code = readAccess().code;
+  if (!code) throw new Error('请先登录账号');
+  clipboard.writeText(code);
+  return { ok: true };
 });
 ipcMain.handle('set-api-key', (_e, key) => {
   authorize('configureApi');

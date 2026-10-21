@@ -218,7 +218,7 @@ test('抓取：访问码失效时立刻停止，不继续打后面的组', async
   const errors = [];
   await runOnce(client, s, { follows: ['a', 'b', 'c', 'd', 'e', 'f'], group_size: 2 }, { errors });
   assert.strictEqual(f.calls.length, 1);
-  assert.match(errors[0].message, /访问码无效/);
+  assert.match(errors[0].message, /登录账号无效/);
   s.close();
 });
 

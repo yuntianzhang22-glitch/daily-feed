@@ -102,7 +102,7 @@ try {
     });
     const a = r.account;
     console.log(`已创建${plan === 'paid' ? '付费' : '内测'}账号：${a.name}  账号 ${a.account_no}`);
-    console.log(`访问码（只显示这一次，请私下发给对方）：${r.code}`);
+    console.log(`登录账号（无需密码，只显示这一次，请私下发给对方）：${r.code}`);
     if (plan === 'paid') console.log(`余额为 0。对方转账时备注账号 ${a.account_no}，收到后运行：node relay/admin.mjs topup ${a.account_no} <金额>`);
   } else if (cmd === 'list') {
     const r = await call('/admin/codes');

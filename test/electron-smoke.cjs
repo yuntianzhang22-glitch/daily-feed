@@ -32,6 +32,7 @@ app.whenReady().then(async () => {
     assert.notEqual(await run('getComputedStyle(document.getElementById("api-key-box")).display'), 'none');
     assert.equal((await run('api.accessInfo()')).permissions.configureApi, true);
     await denied('api.setAccessCode("df_do_not_overwrite_owner")');
+    await denied('api.copyLoginAccount()');
     assert.doesNotMatch(await run('document.getElementById("access-hint").textContent'), /内测|月额度|充值|访问码/);
     await run('document.getElementById("settings").close()');
     for (const [role, scenario, expected] of [
@@ -47,8 +48,10 @@ app.whenReady().then(async () => {
       await run('openSettings().then(() => renderAccess())');
       const hint = await run('document.getElementById("access-hint").textContent');
       assert.match(hint, scenario === 'disabled' ? /停用/ : role === 'paid' ? /余额 ¥/ : /本月额度/);
-      assert.equal(await run('document.getElementById("access-title").textContent'), '访问码');
-      assert.notEqual(await run('getComputedStyle(document.getElementById("access-code-row")).display'), 'none');
+      assert.equal(await run('document.getElementById("access-title").textContent'), '账号登录');
+      assert.equal(await run('getComputedStyle(document.getElementById("access-code-row")).display'), 'none');
+      assert.equal(await run('document.getElementById("copy-account").disabled'), true);
+      await assert.rejects(run('api.copyLoginAccount()'), /验收账号/);
       for (const id of ['api-key-box', 'keywords-box', 'estimate-panel', 'avg-posts-field']) {
         assert.equal(await run(`getComputedStyle(document.getElementById(${JSON.stringify(id)})).display`), 'none');
       }

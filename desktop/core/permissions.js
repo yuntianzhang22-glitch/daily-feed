@@ -28,7 +28,7 @@ function requirePermission(role, permission) {
 }
 
 function verifiedMemberRole(plan = 'beta') {
-  if (!['beta', 'paid'].includes(plan)) throw new Error('访问码返回的用户身份无效');
+  if (!['beta', 'paid'].includes(plan)) throw new Error('登录账号返回的用户身份无效');
   return plan;
 }
 

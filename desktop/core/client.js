@@ -24,7 +24,7 @@ class ApiError extends Error {
 class FeedClient {
   // fetchImpl(url, init) -> Response，可注入以便测试
   constructor({ mode, relayUrl, accessCode, apiKey, directBase = TWITTERAPI_BASE, fetchImpl = fetch, maxRetries = 3, sleep } = {}) {
-    if (mode === 'relay' && (!relayUrl || !accessCode)) throw new ApiError('未配置访问码', 0, 'no_access');
+    if (mode === 'relay' && (!relayUrl || !accessCode)) throw new ApiError('尚未登录账号', 0, 'no_access');
     if (mode === 'direct' && !apiKey) throw new ApiError('未设置 API Key', 0, 'no_key');
     if (mode !== 'relay' && mode !== 'direct') throw new ApiError('未配置数据来源', 0, 'no_access');
     this.mode = mode;
@@ -111,7 +111,7 @@ class FeedClient {
 }
 
 function friendly(status, code, msg, body) {
-  if (code === 'invalid_code' || status === 401) return '访问码无效或已停用，请联系管理员';
+  if (code === 'invalid_code' || status === 401) return '登录账号无效或已停用，请联系管理员';
   if (code === 'quota_exceeded') return '本月抓取额度已用完，下个月自动恢复';
   if (code === 'balance_empty') {
     const no = body && body.account_no;
