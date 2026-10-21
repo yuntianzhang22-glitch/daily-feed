@@ -339,7 +339,7 @@ ipcMain.handle('access-info', async () => {
   if (m.mode === 'relay') {
     try {
       const s = await refreshLimits();
-      Object.assign(info, { name: s.name, quota: s.quota, limits });
+      Object.assign(info, { name: s.name, plan: s.plan || 'beta', account_no: s.account_no, quota: s.quota, balance: s.balance, limits });
     } catch (e) {
       info.error = e.message;
     }

@@ -50,7 +50,7 @@ class FeedClient {
       const retryable = (res.status === 429 && code !== 'quota_exceeded') || res.status >= 500;
       if (retryable && attempt < this.maxRetries) { await this.sleep(2000 * 2 ** attempt); continue; }
       const msg = (body && (body.message || body.error || body.msg)) || text.slice(0, 200) || res.statusText;
-      throw new ApiError(friendly(res.status, code, msg), res.status, code);
+      throw new ApiError(friendly(res.status, code, msg, body), res.status, code);
     }
   }
 
@@ -64,6 +64,7 @@ class FeedClient {
         body: JSON.stringify({ query, queryType, cursor }),
       });
       if (body.quota) this.quota = body.quota;
+      if (body.balance !== undefined) this.balance = body.balance;
     } else {
       const qs = new URLSearchParams({ query, queryType, cursor: cursor || '' });
       body = await this.request(`${TWITTERAPI_BASE}/twitter/tweet/advanced_search?${qs}`, {
@@ -93,13 +94,18 @@ class FeedClient {
       headers: { Authorization: `Bearer ${this.accessCode}` },
     });
     this.quota = body.quota || null;
+    this.balance = body.balance ?? null;
     return body;
   }
 }
 
-function friendly(status, code, msg) {
+function friendly(status, code, msg, body) {
   if (code === 'invalid_code' || status === 401) return '访问码无效或已停用，请联系管理员';
   if (code === 'quota_exceeded') return '本月抓取额度已用完，下个月自动恢复';
+  if (code === 'balance_empty') {
+    const no = body && body.account_no;
+    return `余额不足，请充值${no ? `（转账时备注账号 ${no}）` : ''}`;
+  }
   if (code === 'too_frequent') return '抓取太频繁，请稍后再试';
   if (status === 402) return 'API 余额不足，请联系管理员充值';
   return `请求失败（${status || '网络'}）：${msg}`;

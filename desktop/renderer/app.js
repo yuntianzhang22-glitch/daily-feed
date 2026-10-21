@@ -679,10 +679,17 @@ async function renderAccess() {
   const maxDays = accessLimits.max_runs_per_week;
   if (info.mode === 'relay' && info.error) {
     setHint('access-hint', info.error, 'warn');
+  } else if (info.mode === 'relay' && info.plan === 'paid') {
+    // 付费账号：显示账号和余额，余额不足时提示充值方式
+    const b = info.balance || { cny: 0 };
+    const low = b.cny < 1;
+    setHint('access-hint',
+      `已连接（${info.name || '已验证'}，账号 ${info.account_no}）。余额 ¥${b.cny.toFixed(2)}，本月已花 ¥${(b.month_spent_cny || 0).toFixed(2)}。` +
+      (low ? ` 余额快用完了，转账充值时请备注账号 ${info.account_no}。` : ''), low ? 'warn' : 'ok');
   } else if (info.mode === 'relay') {
     const q = info.quota || {};
     setHint('access-hint',
-      `已连接（${info.name || '已验证'}）。本月共用额度已用 ${usd(q.used_usd)} / ${usd(q.limit_usd)}` +
+      `已连接（${info.name || '已验证'}${info.account_no ? `，账号 ${info.account_no}` : ''}，内测）。本月额度已用 ${usd(q.used_usd)} / ${usd(q.limit_usd)}` +
       (maxDays && maxDays < 7 ? `，每周最多抓 ${maxDays} 天` : '') + '。', 'ok');
   } else if (info.mode === 'direct') {
     setHint('access-hint', '当前使用本机 API Key 直连。填写访问码后改走中转。');

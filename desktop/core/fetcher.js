@@ -98,7 +98,7 @@ async function runOnce(client, store, cfg, { log = () => {}, errors = [] } = {})
     } catch (e) {
       errors.push({ target: job.label, message: e.message });
       // 访问码无效或额度用尽时后面的请求也会失败，直接停
-      if (['invalid_code', 'quota_exceeded', 'no_access', 'no_key'].includes(e.code)) break;
+      if (['invalid_code', 'quota_exceeded', 'balance_empty', 'no_access', 'no_key'].includes(e.code)) break;
     }
   }
   const total = Object.values(results).reduce((s, v) => s + v.length, 0);

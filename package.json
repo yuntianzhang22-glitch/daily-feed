@@ -7,7 +7,7 @@
   "main": "desktop/main.js",
   "scripts": {
     "start": "electron .",
-    "test": "ELECTRON_RUN_AS_NODE=1 electron --test test/core.test.js && (test ! -f relay/relay.test.mjs || node --test relay/relay.test.mjs)",
+    "test": "ELECTRON_RUN_AS_NODE=1 electron --test test/core.test.js && (test ! -f relay/relay.test.mjs || node --import ./relay/test-loader.mjs --test relay/relay.test.mjs relay/ledger.test.mjs)",
     "icon": "electron build/make-icon.js",
     "dist": "npm test && bash build/package-mac.sh"
   },

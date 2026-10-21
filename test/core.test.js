@@ -222,6 +222,17 @@ test('抓取：访问码失效时立刻停止，不继续打后面的组', async
   s.close();
 });
 
+test('抓取：付费账号余额不足时停止抓取，提示里带上充值要备注的账号', async () => {
+  const s = new Store(path.join(tmpdir(), 't.db'));
+  const f = fakeFetch([], { status: 402, body: { code: 'balance_empty', message: 'x', account_no: 'DF-7K3QX', balance: { cny: 0 } } });
+  const client = new FeedClient({ mode: 'relay', relayUrl: 'https://r', accessCode: 'c', fetchImpl: f, sleep: async () => {} });
+  const errors = [];
+  await runOnce(client, s, { follows: ['a', 'b', 'c', 'd', 'e', 'f'], group_size: 2 }, { errors });
+  assert.strictEqual(f.calls.length, 1);
+  assert.strictEqual(errors[0].message, '余额不足，请充值（转账时备注账号 DF-7K3QX）');
+  s.close();
+});
+
 test('抓取：5xx 重试后成功，额度用尽不重试', async () => {
   let n = 0;
   const flaky = async () => (++n < 3 ? new Response('err', { status: 502 }) : new Response(JSON.stringify({ tweets: [] })));
