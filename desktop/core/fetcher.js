@@ -113,7 +113,8 @@ const WEEKS_PER_MONTH = 30 / 7;
 function estimateMonthlyCost(cfg) {
   const groups = followGroups(cfg);
   const people = groups.reduce((s, g) => s + g.length, 0);
-  const gaps = weeklyGapsHours(cfg.schedule_days);
+  // 总开关关闭时按不自动抓取估算
+  const gaps = weeklyGapsHours(cfg.schedule_enabled === false ? [] : cfg.schedule_days);
   const keywords = (cfg.keywords || []).filter(Boolean).length;
   const empty = { runs: 0, requests: 0, tweets: 0, low: 0, expected: 0, high: 0, people, groups: groups.length, keywords_high: 0 };
   if ((!groups.length && !keywords) || !gaps.length) return empty;

@@ -10,6 +10,8 @@ const DEFAULTS = {
   version: CONFIG_VERSION,
   follows: [],
   keywords: [],
+  // 定时抓取总开关。关闭时保留下面选好的天和时间，重新打开就恢复
+  schedule_enabled: true,
   // 每周哪几天抓（0=周日 … 6=周六），空数组表示不自动抓取；几点抓
   schedule_days: DEFAULT_DAYS,
   schedule_time: DEFAULT_TIME,
@@ -71,6 +73,8 @@ function clean(cfg, limits = {}) {
     version: CONFIG_VERSION,
     follows: cleanUsernames(cfg.follows).slice(0, maxFollows),
     keywords: (cfg.keywords || []).map((k) => String(k).trim()).filter(Boolean).slice(0, 20),
+    // 没有这个字段的旧配置视为开启
+    schedule_enabled: cfg.schedule_enabled !== false,
     schedule_days: capDays(cleanDays(cfg.schedule_days ?? DEFAULTS.schedule_days), limits.max_runs_per_week),
     schedule_time: cleanTime(cfg.schedule_time),
     max_per_target: num(cfg.max_per_target, 0, 100, DEFAULTS.max_per_target),
@@ -131,4 +135,9 @@ class ConfigFile {
   }
 }
 
-module.exports = { ConfigFile, migrate, clean, capDays, DEFAULTS, CONFIG_VERSION };
+// 实际生效的抓取日：总开关关闭时为空
+function activeDays(cfg) {
+  return cfg.schedule_enabled === false ? [] : cfg.schedule_days || [];
+}
+
+module.exports = { ConfigFile, migrate, clean, capDays, activeDays, DEFAULTS, CONFIG_VERSION };

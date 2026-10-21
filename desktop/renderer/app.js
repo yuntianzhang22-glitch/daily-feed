@@ -359,7 +359,10 @@ const DAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
 const MINUTE_STEP = 5;
 const pad2 = (n) => String(n).padStart(2, '0');
 
-const sched = { days: [1, 4], hour: 9, minute: 0 };
+const sched = { enabled: true, days: [1, 4], hour: 9, minute: 0 };
+
+// 实际生效的抓取日：总开关关闭时为空
+const activeDays = (enabled, days) => (enabled === false ? [] : days || []);
 
 function describeDays(days) {
   if (!days.length) return '不自动抓取';
@@ -370,8 +373,9 @@ function describeDays(days) {
   return DAY_ORDER.filter((d) => days.includes(d)).map((d) => DAY_NAMES[d]).join('、');
 }
 
-function scheduleSummary(days, time) {
-  if (!days.length) return '自动抓取已关闭，只能手动点「立即抓取」';
+function scheduleSummary(enabled, days, time) {
+  if (enabled === false) return '定时抓取已关闭，只能手动点「立即抓取」';
+  if (!days.length) return '没有选择抓取日，不会自动抓取';
   const n = days.length;
   return `${describeDays(days)} ${time} 自动抓取，每周 ${n} 次，每月约 ${Math.round(n * 30 / 7)} 次`;
 }
@@ -390,8 +394,12 @@ function renderFreq() {
   all.checked = sched.days.length === 7;
   all.indeterminate = sched.days.length > 0 && sched.days.length < 7;
   $('freq-text').textContent = describeDays(sched.days);
-  // 关闭自动抓取时时间没有意义
-  $('time-button').disabled = !sched.days.length;
+  // 总开关关闭时频率和时间都不能改（选好的值会保留）；没选天时时间没有意义
+  const sw = $('schedule-switch');
+  sw.setAttribute('aria-checked', String(sched.enabled));
+  $('schedule-fields').classList.toggle('off', !sched.enabled);
+  $('freq-button').disabled = !sched.enabled;
+  $('time-button').disabled = !sched.enabled || !sched.days.length;
 }
 
 function renderTime() {
@@ -440,6 +448,7 @@ function scheduleChanged() {
 }
 
 function loadSchedule(cfg) {
+  sched.enabled = cfg.schedule_enabled !== false;
   sched.days = (cfg.schedule_days || []).map(Number);
   const [h, m] = String(cfg.schedule_time || '09:00').split(':').map(Number);
   sched.hour = h;
@@ -542,6 +551,7 @@ async function saveApiKey() {
 function settingsForm() {
   return {
     ...settingsCfg,
+    schedule_enabled: sched.enabled,
     schedule_days: [...sched.days].sort((a, b) => a - b),
     schedule_time: timeValue(),
     max_per_target: Number($('max-per-target').value) || 0,
@@ -555,8 +565,8 @@ function settingsForm() {
 const updateEstimate = debounce(async () => {
   const cfg = settingsForm();
   const maxDays = accessLimits.max_runs_per_week;
-  $('schedule-hint').textContent = scheduleSummary(cfg.schedule_days, cfg.schedule_time) +
-    (maxDays && cfg.schedule_days.length > maxDays ? `。你的额度每周最多 ${maxDays} 天，保存时只保留前 ${maxDays} 天` : '');
+  $('schedule-hint').textContent = scheduleSummary(cfg.schedule_enabled, cfg.schedule_days, cfg.schedule_time) +
+    (cfg.schedule_enabled && maxDays && cfg.schedule_days.length > maxDays ? `。你的额度每周最多 ${maxDays} 天，保存时只保留前 ${maxDays} 天` : '');
   const [e, used] = await Promise.all([api.estimate(cfg), api.usage()]);
   const extra = e.keywords_high || 0;
   $('est-expected').textContent = usd(e.expected + extra);
@@ -565,7 +575,7 @@ const updateEstimate = debounce(async () => {
   $('est-used').textContent = usd(used.usd);
   if (!e.people && !cfg.keywords.length) {
     $('est-detail').textContent = '还没有关注任何人，点侧栏「关注」勾选。';
-  } else if (!cfg.schedule_days.length) {
+  } else if (!activeDays(cfg.schedule_enabled, cfg.schedule_days).length) {
     $('est-detail').textContent = '自动抓取已关闭，只有手动抓取会产生费用（每次约 $0.003 × 组数）。';
   } else {
     $('est-detail').textContent =
@@ -583,7 +593,10 @@ async function saveSettings(e) {
     const saved = await api.saveConfig(form);
     $('settings').close();
     const cut = form.schedule_days.length - saved.schedule_days.length;
-    setStatus(cut > 0 ? `已保存，抓取日调整为${describeDays(saved.schedule_days)}` : '设置已保存', cut > 0);
+    // 保存后侧栏直接显示新的计划（下次抓取时间或已关闭），被额度截掉天数时先提示这一点
+    const { next } = await api.status();
+    state.nextRun = next;
+    setStatus(cut > 0 ? `已保存，抓取日调整为${describeDays(saved.schedule_days)}` : scheduleText(), cut > 0);
   } catch (err) {
     $('settings-error').textContent = errText(err);
   }
@@ -605,6 +618,12 @@ function initSchedulePickers() {
     closeMenus('time');
     setOpen($('time-button'), $('time-menu'), open);
     if (open) { scrollSelectedIntoView(); $('hour-col').focus(); }
+  });
+
+  $('schedule-switch').addEventListener('click', () => {
+    sched.enabled = !sched.enabled;
+    closeMenus();
+    scheduleChanged();
   });
 
   $('day-all').addEventListener('change', (e) => {
@@ -773,7 +792,9 @@ const updateFollowsCost = debounce(async () => {
   const cfg = { ...(await api.getConfig()), follows: followDraft };
   const e = await api.estimate(cfg);
   $('follows-cost').textContent = e.people
-    ? `按当前计划（${describeDays(cfg.schedule_days || [])} ${cfg.schedule_time || ''}），预计每月 ${usd(e.expected)}，最多 ${usd(e.high)}。`
+    ? (cfg.schedule_enabled === false
+      ? '定时抓取已关闭，只有手动抓取时才会产生费用。'
+      : `按当前计划（${describeDays(cfg.schedule_days || [])} ${cfg.schedule_time || ''}），预计每月 ${usd(e.expected)}，最多 ${usd(e.high)}。`)
     : '';
 }, 150);
 
@@ -852,7 +873,7 @@ async function fetchNow() {
 }
 
 function scheduleText() {
-  if (!state.nextRun) return '自动抓取已关闭';
+  if (!state.nextRun) return '定时抓取已关闭';
   const d = new Date(state.nextRun);
   const week = '日一二三四五六'[d.getDay()];
   const date = `${d.getMonth() + 1}/${d.getDate()}`;

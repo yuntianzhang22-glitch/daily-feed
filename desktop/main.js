@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 
 const { Store } = require('./core/store');
-const { ConfigFile } = require('./core/config');
+const { ConfigFile, activeDays } = require('./core/config');
 const { FeedClient } = require('./core/client');
 const { runOnce, estimateMonthlyCost, cleanUsernames } = require('./core/fetcher');
 const { Updater } = require('./core/updater');
@@ -246,7 +246,7 @@ function schedule() {
   timer = null;
   nextRun = null;
   const cfg = config.load();
-  if (!cfg.schedule_days.length || accessMode().mode === 'none') {
+  if (!activeDays(cfg).length || accessMode().mode === 'none') {
     sendToUi('schedule', { next: null });
     return;
   }
@@ -325,7 +325,10 @@ ipcMain.handle('backend', (_e, method, params) => {
   return h(params);
 });
 ipcMain.handle('save-config', (_e, cfg) => {
-  const saved = config.save({ ...config.load(), ...cfg }, limits);
+  const before = config.load();
+  const saved = config.save({ ...before, ...cfg }, limits);
+  // 从关闭切回开启时，关闭期间错过的时间点不补抓，从现在开始重新计时
+  if (!activeDays(before).length && activeDays(saved).length) writeLastAuto(Date.now());
   schedule();
   return saved;
 });

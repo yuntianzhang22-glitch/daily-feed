@@ -326,6 +326,28 @@ progress { width: 100%; height: 6px; accent-color: var(--accent); }
 }
 .update-banner:hover { background: #10202d; }
 
+/* ---------- 定时抓取开关 */
+
+.switch-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px;
+}
+.switch-text { display: grid; gap: 2px; }
+.switch-title { font-size: 14px; color: var(--text); font-weight: 600; }
+.switch {
+  position: relative; flex-shrink: 0; width: 44px; height: 26px; padding: 0;
+  border: 0; border-radius: 999px; cursor: pointer; background: #3e4449;
+  transition: background .15s;
+}
+.switch .knob {
+  position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%;
+  background: #fff; transition: transform .15s;
+}
+.switch[aria-checked="true"] { background: var(--accent); }
+.switch[aria-checked="true"] .knob { transform: translateX(18px); }
+@media (prefers-reduced-motion: reduce) { .switch, .switch .knob { transition: none; } }
+#schedule-fields.off { opacity: .45; }
+
 /* ---------- 抓取频率 / 时间选择器 */
 
 .field { display: grid; gap: 6px; }

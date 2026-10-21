@@ -6,7 +6,7 @@ const os = require('os');
 const path = require('path');
 
 const { Store, parseXDate } = require('../desktop/core/store');
-const { ConfigFile, migrate, clean } = require('../desktop/core/config');
+const { ConfigFile, migrate, clean, activeDays } = require('../desktop/core/config');
 const { FeedClient } = require('../desktop/core/client');
 const { followGroups, runOnce, estimateMonthlyCost, cleanUsernames } = require('../desktop/core/fetcher');
 const { compareVersions, validateManifest, Updater, currentBundlePath } = require('../desktop/core/updater');
@@ -166,6 +166,13 @@ test('配置：边界值、非法的天和时间、共用额度下每周最多�
   assert.deepStrictEqual(clean({ schedule_days: [0, 1, 2, 3, 4, 5, 6] }, { max_runs_per_week: 3 }).schedule_days, [1, 2, 3]);
   assert.deepStrictEqual(clean({ schedule_days: [0, 6] }, { max_runs_per_week: 1 }).schedule_days, [6]);
   assert.deepStrictEqual(clean({ schedule_days: [1, 4] }, { max_runs_per_week: 7 }).schedule_days, [1, 4]);
+  // 定时抓取总开关：旧配置没有这个字段时视为开启；关闭时保留选好的天和时间
+  assert.strictEqual(clean({}).schedule_enabled, true);
+  assert.strictEqual(clean({ schedule_enabled: 'no' }).schedule_enabled, true);
+  const off = clean({ schedule_enabled: false, schedule_days: [2, 5], schedule_time: '21:30' });
+  assert.deepStrictEqual([off.schedule_enabled, off.schedule_days, off.schedule_time], [false, [2, 5], '21:30']);
+  assert.deepStrictEqual(activeDays(off), []);
+  assert.deepStrictEqual(activeDays({ ...off, schedule_enabled: true }), [2, 5]);
   assert.strictEqual(clean({ follows: ['a', 'b', 'c'] }, { max_follows: 2 }).follows.length, 2);
 });
 
@@ -248,6 +255,9 @@ test('费用估算：按每周抓取日计算，间隔不均匀时分别计算',
   assert.strictEqual(quiet.expected, usd(W * 3 * (6 + 8) * 15));
   // 不自动抓取
   assert.strictEqual(estimateMonthlyCost({ follows: twelve, schedule_days: [] }).high, 0);
+  // 总开关关闭时即使选了天也按 0 估算
+  const off = estimateMonthlyCost({ follows: twelve, schedule_enabled: false, schedule_days: [0, 1, 2, 3, 4, 5, 6] });
+  assert.deepStrictEqual([off.runs, off.high], [0, 0]);
 });
 
 test('抓取计划：下次 / 上次时间点、跨周、恰好整点', () => {

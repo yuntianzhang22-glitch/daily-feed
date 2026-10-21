@@ -89,7 +89,17 @@
           <p class="hint" id="key-hint"></p>
         </details>
       </section>
-      <div class="row">
+      <div class="switch-row">
+        <span class="switch-text">
+          <span class="switch-title" id="schedule-switch-label">定时抓取</span>
+          <span class="hint" id="schedule-switch-hint">关闭后只在你点「立即抓取」时抓，已选的天和时间会保留</span>
+        </span>
+        <button class="switch" type="button" role="switch" id="schedule-switch"
+                aria-checked="true" aria-labelledby="schedule-switch-label" aria-describedby="schedule-switch-hint">
+          <span class="knob" aria-hidden="true"></span>
+        </button>
+      </div>
+      <div class="row" id="schedule-fields">
         <div class="field">
           <span class="field-label" id="freq-label">抓取频率</span>
           <div class="picker" id="freq-picker">
