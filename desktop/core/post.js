@@ -1,0 +1,153 @@
+// 从 twitterapi.io 返回的原始推文 JSON 里取出界面要显示的内容：
+// 正文（去掉 t.co 短链）、链接、图片 / 视频、链接卡片、被引用的帖子、转推。
+// 原始 JSON 已完整存在 tweets.raw 里，旧帖子不用重新抓取。
+//
+// 注意：displayTextRange 和 entities 的 indices 是按 Unicode 码点计数的，
+// 不是 JS 字符串下标（emoji 在 JS 里占两位），所以先按码点拆开再处理。
+
+const MAX_QUOTE_DEPTH = 1; // 引用里再嵌套的引用只显示一层，避免无限套娃
+const X_URL = /^https:\/\/(x|twitter)\.com\//;
+
+function cp(text) {
+  return Array.from(String(text || ''));
+}
+
+// 正文：只保留 X 界面上显示的那段（displayTextRange），
+// 把 t.co 短链换成真实地址的显示文本；图片和指向被引用帖子的链接直接去掉（下面单独显示）
+function bodyOf(t) {
+  const chars = cp(t.text);
+  const range = Array.isArray(t.displayTextRange) && t.displayTextRange.length === 2
+    ? t.displayTextRange : [0, chars.length];
+  const start = Math.max(0, range[0]);
+  const end = Math.min(chars.length, range[1]);
+  const media = (t.extendedEntities && t.extendedEntities.media) || (t.entities && t.entities.media) || [];
+  const urls = (t.entities && t.entities.urls) || [];
+  const quotedUrl = t.quoted_tweet && t.quoted_tweet.url;
+
+  const edits = [];
+  for (const m of media) {
+    if (Array.isArray(m.indices)) edits.push({ a: m.indices[0], b: m.indices[1], text: '' });
+  }
+  const links = [];
+  for (const u of urls) {
+    if (!Array.isArray(u.indices)) continue;
+    const href = u.expanded_url || u.url;
+    if (quotedUrl && isSamePost(href, quotedUrl)) {
+      edits.push({ a: u.indices[0], b: u.indices[1], text: '' });
+      continue;
+    }
+    const display = u.display_url || href;
+    edits.push({ a: u.indices[0], b: u.indices[1], text: display });
+    links.push({ url: href, display });
+  }
+
+  // 按位置从前往后拼接；同一个 t.co 可能被多张图片共用，重叠的区间只处理第一次
+  edits.sort((x, y) => x.a - y.a);
+  let out = '';
+  let i = start;
+  for (const e of edits) {
+    if (e.b <= start || e.a >= end || e.a < i) continue;
+    out += chars.slice(i, e.a).join('') + e.text;
+    i = e.b;
+  }
+  if (i < end) out += chars.slice(i, end).join('');
+  const text = out.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  return { text, links };
+}
+
+function isSamePost(a, b) {
+  const id = (u) => (/\/status\/(\d+)/.exec(String(u || '')) || [])[1];
+  return Boolean(id(a)) && id(a) === id(b);
+}
+
+function mediaOf(t) {
+  const list = (t.extendedEntities && t.extendedEntities.media) || [];
+  return list.slice(0, 4).map((m) => {
+    const isVideo = m.type === 'video' || m.type === 'animated_gif';
+    const size = m.original_info || {};
+    return {
+      type: isVideo ? (m.type === 'animated_gif' ? 'gif' : 'video') : 'photo',
+      // 预览图统一用 pbs.twimg.com，不在应用里直接播视频（点开去 X 看）
+      thumb: m.media_url_https || '',
+      alt: m.ext_alt_text || '',
+      width: size.width || 0,
+      height: size.height || 0,
+      duration: isVideo && m.video_info ? Math.round((m.video_info.duration_millis || 0) / 1000) : 0,
+      url: X_URL.test(m.expanded_url || '') ? m.expanded_url : t.url,
+    };
+  }).filter((m) => /^https:\/\/pbs\.twimg\.com\//.test(m.thumb));
+}
+
+// 链接预览卡片（文章、网页）
+function cardOf(t) {
+  const c = t.card;
+  if (!c || !Array.isArray(c.binding_values)) return null;
+  const v = {};
+  for (const b of c.binding_values) {
+    const val = b.value || {};
+    v[b.key] = val.string_value ?? (val.image_value && val.image_value.url) ?? null;
+  }
+  const url = v.card_url || c.url || '';
+  const title = v.title || '';
+  if (!title) return null;
+  const image = v.summary_photo_image_large || v.photo_image_full_size_large || v.thumbnail_image_large || v.thumbnail_image || '';
+  // 卡片地址一般是 t.co，换成正文里对应的真实地址
+  const real = ((t.entities && t.entities.urls) || []).find((u) => u.url === url);
+  return {
+    title: title.slice(0, 200),
+    description: (v.description || '').slice(0, 300),
+    domain: v.vanity_url || v.domain || '',
+    image: /^https:\/\/pbs\.twimg\.com\//.test(image) ? image : '',
+    url: (real && real.expanded_url) || url,
+  };
+}
+
+function authorOf(t) {
+  const a = t.author || {};
+  return { username: a.userName || '', name: a.name || a.userName || '', avatar: a.profilePicture || '' };
+}
+
+function postView(t, depth = 0) {
+  if (!t || typeof t !== 'object') return null;
+  // 被删除或不可见的引用
+  if (t.unavailable || (!t.text && !t.author)) {
+    return { unavailable: true, url: t.url || '' };
+  }
+  const { text, links } = bodyOf(t);
+  const card = cardOf(t);
+  const view = {
+    id: String(t.id || ''),
+    url: t.url || '',
+    author: authorOf(t),
+    created_at: t.createdAt || '',
+    text,
+    links,
+    media: mediaOf(t),
+    // 有图片时不再显示链接卡片，避免重复
+    card: card,
+    quoted: null,
+  };
+  if (view.media.length && view.card && !view.card.image) view.card = null;
+  if (depth < MAX_QUOTE_DEPTH && t.quoted_tweet && typeof t.quoted_tweet === 'object') {
+    view.quoted = postView(t.quoted_tweet, depth + 1);
+  } else if (t.quoted_tweet && typeof t.quoted_tweet === 'object') {
+    // 超过层数只留一个跳转链接
+    view.quoted = { more: true, url: t.quoted_tweet.url || '', author: authorOf(t.quoted_tweet) };
+  }
+  return view;
+}
+
+// 一条帖子的完整显示内容。转推显示原帖，并标明是谁转的
+function extractPost(raw) {
+  let t;
+  try { t = typeof raw === 'string' ? JSON.parse(raw || '{}') : (raw || {}); } catch { return null; }
+  const rt = t.retweeted_tweet && typeof t.retweeted_tweet === 'object' ? t.retweeted_tweet : null;
+  if (rt) {
+    const view = postView(rt);
+    if (view && !view.unavailable) view.retweeted_by = authorOf(t);
+    return view;
+  }
+  return postView(t);
+}
+
+module.exports = { extractPost, bodyOf, mediaOf, cardOf };

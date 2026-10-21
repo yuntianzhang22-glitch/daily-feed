@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
+const { extractPost } = require('./post');
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS tweets (
@@ -164,12 +165,16 @@ function rowToTweet(row) {
   const { raw, ...d } = row;
   let author = {};
   try { author = (JSON.parse(raw || '{}').author) || {}; } catch { /* 损坏的 raw 忽略 */ }
+  // 引用、图片、视频、链接卡片都从原始 JSON 里取，旧帖子同样有效
+  let post = null;
+  try { post = extractPost(raw); } catch { /* 解析不了就只显示正文 */ }
   return {
     ...d,
     author_name: author.name ?? null,
     avatar: author.profilePicture ?? null,
     is_read: Boolean(d.is_read),
     starred: Boolean(d.starred),
+    post,
   };
 }
 

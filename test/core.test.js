@@ -11,6 +11,7 @@ const { FeedClient } = require('../desktop/core/client');
 const { followGroups, runOnce, estimateMonthlyCost, cleanUsernames } = require('../desktop/core/fetcher');
 const { compareVersions, validateManifest, Updater, currentBundlePath } = require('../desktop/core/updater');
 const { nextSlot, prevSlot, weeklyGapsHours, daysFromInterval, describeDays } = require('../desktop/core/schedule');
+const { extractPost } = require('../desktop/core/post');
 
 const tmpdir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'df-test-'));
 
@@ -269,6 +270,53 @@ test('抓取计划：下次 / 上次时间点、跨周、恰好整点', () => {
   assert.strictEqual(describeDays([1, 2, 3, 4, 5]), '工作日');
   assert.strictEqual(describeDays([0, 6]), '周末');
   assert.strictEqual(describeDays([0, 3, 1]), '周一、周三、周日');
+});
+
+test('帖子内容：引用、图片、链接、emoji 下标、转推、引用嵌套', () => {
+  // 正文含 emoji（JS 里占 2 个下标，X 按 1 个码点算），末尾是图片短链和引用短链
+  const text = 'Hi 👋 read https://t.co/AAA https://t.co/PIC https://t.co/QQQ';
+  const t = {
+    id: '1', url: 'https://x.com/a/status/1', text, author: { userName: 'a', name: 'A' },
+    displayTextRange: [0, 31],
+    entities: { urls: [
+      { url: 'https://t.co/AAA', expanded_url: 'https://example.com/post', display_url: 'example.com/post', indices: [10, 26] },
+      { url: 'https://t.co/QQQ', expanded_url: 'https://x.com/b/status/2', display_url: 'x.com/b/status/2', indices: [44, 60] },
+    ] },
+    extendedEntities: { media: [{ type: 'photo', media_url_https: 'https://pbs.twimg.com/media/x.jpg', indices: [27, 43], expanded_url: 'https://x.com/a/status/1/photo/1' }] },
+    quoted_tweet: {
+      id: '2', url: 'https://x.com/b/status/2', text: 'quoted body', author: { userName: 'b', name: 'B' },
+      quoted_tweet: { id: '3', url: 'https://x.com/c/status/3', text: 'deeper', author: { userName: 'c' } },
+    },
+  };
+  const v = extractPost(t);
+  assert.strictEqual(v.text, 'Hi 👋 read example.com/post');
+  assert.deepStrictEqual(v.links, [{ url: 'https://example.com/post', display: 'example.com/post' }]);
+  assert.strictEqual(v.media.length, 1);
+  assert.strictEqual(v.media[0].type, 'photo');
+  assert.strictEqual(v.quoted.author.username, 'b');
+  assert.strictEqual(v.quoted.text, 'quoted body');
+  // 第二层引用只留跳转链接
+  assert.strictEqual(v.quoted.quoted.more, true);
+  assert.strictEqual(v.quoted.quoted.url, 'https://x.com/c/status/3');
+
+  // 转推：显示原帖，标明转发人
+  const rt = extractPost({ id: '9', text: 'RT @b: x', author: { userName: 'a' }, retweeted_tweet: { id: '2', text: 'original', author: { userName: 'b' }, url: 'https://x.com/b/status/2' } });
+  assert.strictEqual(rt.text, 'original');
+  assert.strictEqual(rt.retweeted_by.username, 'a');
+
+  // 被删除的引用、非 twimg 的图片地址、损坏的 JSON
+  assert.strictEqual(extractPost({ id: '1', text: 'x', author: { userName: 'a' }, quoted_tweet: { unavailable: true } }).quoted.unavailable, true);
+  assert.strictEqual(extractPost({ id: '1', text: 'x', author: { userName: 'a' }, extendedEntities: { media: [{ type: 'photo', media_url_https: 'https://evil.example/x.jpg', indices: [0, 0] }] } }).media.length, 0);
+  assert.strictEqual(extractPost('{bad'), null);
+});
+
+test('Store：list 返回解析好的帖子内容', () => {
+  const s = new Store(path.join(tmpdir(), 't.db'));
+  s.save({ ...tweet(1, 'alice'), quoted_tweet: { id: '2', text: 'ctx', url: 'https://x.com/bob/status/2', author: { userName: 'bob' } } }, 'user:alice', 'now');
+  const [t] = s.list();
+  assert.strictEqual(t.post.quoted.text, 'ctx');
+  assert.strictEqual(t.post.quoted.author.username, 'bob');
+  s.close();
 });
 
 test('更新：版本比较与清单校验', () => {

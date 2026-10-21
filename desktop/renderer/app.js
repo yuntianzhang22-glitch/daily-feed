@@ -150,6 +150,102 @@ function emptyText() {
   return '还没有帖子，点「立即抓取」试试';
 }
 
+// ---- 帖子内容：正文、图片 / 视频、链接卡片、被引用的帖子（所有文字都用 textContent，不拼 HTML）
+
+const TWIMG = /^https:\/\/pbs\.twimg\.com\//;
+
+function openLink(url) {
+  if (/^https?:\/\//.test(url || '')) api.openUrl(url);
+}
+
+function linkButton(cls, url, label, ...children) {
+  return el('button', {
+    class: cls, type: 'button', title: url, 'aria-label': label,
+    onclick: (e) => { e.stopPropagation(); openLink(url); },
+  }, ...children);
+}
+
+function formatDuration(sec) {
+  if (!sec) return '';
+  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+}
+
+function renderMedia(media, postUrl) {
+  if (!media || !media.length) return null;
+  const grid = el('div', { class: `media-grid n${Math.min(media.length, 4)}` });
+  for (const m of media) {
+    if (!TWIMG.test(m.thumb)) continue;
+    const label = m.type === 'photo' ? (m.alt || '图片，点击在 X 查看') : `${m.type === 'gif' ? 'GIF' : '视频'}，点击在 X 播放`;
+    const img = el('img', { src: m.thumb + (m.thumb.includes('?') ? '' : '?name=small'), alt: m.alt || '', loading: 'lazy', referrerpolicy: 'no-referrer' });
+    const overlay = m.type === 'photo' ? null
+      : el('span', { class: 'play', 'aria-hidden': 'true', text: m.type === 'gif' ? 'GIF' : `▶ ${formatDuration(m.duration)}` });
+    grid.append(linkButton('media-item', m.url || postUrl, label, img, overlay));
+  }
+  return grid.childElementCount ? grid : null;
+}
+
+function renderCard(c) {
+  if (!c) return null;
+  return linkButton('link-card', c.url, `打开链接：${c.title}`,
+    c.image && TWIMG.test(c.image) ? el('img', { src: c.image, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer' }) : null,
+    el('span', { class: 'link-card-body' },
+      c.domain ? el('span', { class: 'link-card-domain', text: c.domain }) : null,
+      el('span', { class: 'link-card-title', text: c.title }),
+      c.description ? el('span', { class: 'link-card-desc', text: c.description }) : null,
+    ),
+  );
+}
+
+// 正文里的链接显示成可点的样子（链接文本本身来自 entities.display_url）
+function renderText(text, links) {
+  const p = el('p', { class: 'tweet-text' });
+  if (!links || !links.length) { p.textContent = text; return p; }
+  let rest = text;
+  for (const l of links) {
+    const i = rest.indexOf(l.display);
+    if (i === -1) continue;
+    p.append(rest.slice(0, i), linkButton('inline-link', l.url, `打开链接 ${l.display}`, l.display));
+    rest = rest.slice(i + l.display.length);
+  }
+  p.append(rest);
+  return p;
+}
+
+function renderQuoted(q) {
+  if (!q) return null;
+  if (q.unavailable) {
+    return el('div', { class: 'quoted unavailable', text: '引用的帖子已删除或不可见' });
+  }
+  if (q.more) {
+    return linkButton('quoted more', q.url, `在 X 查看 @${q.author.username} 的引用帖`,
+      `还引用了 @${q.author.username} 的帖子，点击在 X 查看`);
+  }
+  const box = el('div', { class: 'quoted' });
+  const head = el('div', { class: 'quoted-head' },
+    q.author.avatar && TWIMG.test(q.author.avatar)
+      ? el('img', { class: 'quoted-avatar', src: q.author.avatar, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer' }) : null,
+    el('span', { class: 'name', text: q.author.name }),
+    el('span', { class: 'handle', text: '@' + q.author.username }),
+    q.created_at ? el('span', { class: 'time', text: '· ' + relTime(parseXTime(q.created_at)) }) : null,
+    q.url ? linkButton('icon-btn quoted-open', q.url, `在 X 打开 @${q.author.username} 的这条帖子`, '↗') : null,
+  );
+  box.append(head);
+  if (q.text) box.append(renderText(q.text, q.links));
+  const media = renderMedia(q.media, q.url);
+  if (media) box.append(media);
+  const card = renderCard(q.card);
+  if (card) box.append(card);
+  const nested = renderQuoted(q.quoted);
+  if (nested) box.append(nested);
+  return box;
+}
+
+// 引用帖里的时间是 X 的原始格式（Tue Dec 10 07:00:30 +0000 2024），Date 能直接解析
+function parseXTime(s) {
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? '' : d.toISOString();
+}
+
 function renderTweet(t) {
   const card = el('article', { class: 'tweet' + (t.is_read ? '' : ' unread'), 'data-id': t.id });
 
@@ -218,7 +314,21 @@ function renderTweet(t) {
     el('span', { class: 'actions' }, starBtn, readBtn, openBtn),
   );
 
-  card.append(avatar, el('div', {}, head, el('p', { class: 'tweet-text', text: t.text || '' }), foot));
+  const p = t.post;
+  const body = el('div', { class: 'tweet-body' }, head);
+  if (p && p.retweeted_by) {
+    body.prepend(el('div', { class: 'retweet-note', text: `⟲ @${p.retweeted_by.username} 转发了 @${p.author.username}` }));
+  }
+  if (p) {
+    if (p.text) body.append(renderText(p.text, p.links));
+    for (const part of [renderMedia(p.media, p.url), renderCard(p.card), renderQuoted(p.quoted)]) {
+      if (part) body.append(part);
+    }
+  } else {
+    body.append(el('p', { class: 'tweet-text', text: t.text || '' }));
+  }
+  body.append(foot);
+  card.append(avatar, body);
   return card;
 }
 

@@ -362,8 +362,10 @@ ipcMain.handle('status', () => ({ lastFetch, next: nextRun, version: app.getVers
 ipcMain.handle('check-update', () => checkForUpdate());
 ipcMain.handle('install-update', () => installUpdate());
 ipcMain.handle('open-url', (_e, url) => {
-  // 只允许打开 X 的链接
-  if (/^https:\/\/(x|twitter)\.com\//.test(url)) return shell.openExternal(url);
+  // 帖子里的链接交给系统浏览器打开；只允许 http(s)，防止 file:、javascript: 之类的地址
+  let u;
+  try { u = new URL(String(url)); } catch { return; }
+  if (u.protocol === 'https:' || u.protocol === 'http:') return shell.openExternal(u.href);
 });
 ipcMain.handle('reveal-data', () => shell.openPath(userData()));
 
