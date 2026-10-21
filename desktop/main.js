@@ -7,7 +7,7 @@ const path = require('path');
 
 const { Store } = require('./core/store');
 const { ConfigFile, activeDays } = require('./core/config');
-const { FeedClient } = require('./core/client');
+const { FeedClient, resolveAccess } = require('./core/client');
 const { runOnce, estimateMonthlyCost, cleanUsernames } = require('./core/fetcher');
 const { Updater } = require('./core/updater');
 const { nextSlot, prevSlot } = require('./core/schedule');
@@ -117,7 +117,7 @@ function writeApiKey(key) {
   fs.writeFileSync(P.apiKey(), safeStorage.encryptString(key), { mode: 0o600 });
 }
 
-// 有访问码且配置了中转就走中转；否则用本机 API Key 直连
+// 自用 API Key 优先；只有访问码的内测/付费用户走中转。
 function accessMode() {
   if (APP_CONFIG.lab) {
     if (APP_CONFIG.role === 'owner') return { mode: 'direct', apiKey: process.env.DAILY_FEED_LAB_KEY,
@@ -125,11 +125,7 @@ function accessMode() {
     return { mode: 'relay', relayUrl: APP_CONFIG.relayUrl,
       accessCode: localCode(APP_CONFIG.name, APP_CONFIG.role, APP_CONFIG.scenario) };
   }
-  const access = readAccess();
-  if (APP_CONFIG.relayUrl && access.code) return { mode: 'relay', relayUrl: APP_CONFIG.relayUrl, accessCode: access.code };
-  const apiKey = readApiKey();
-  if (apiKey) return { mode: 'direct', apiKey };
-  return { mode: 'none' };
+  return resolveAccess({ apiKey: readApiKey(), relayUrl: APP_CONFIG.relayUrl, accessCode: readAccess().code });
 }
 
 function makeClient() {
@@ -414,7 +410,9 @@ ipcMain.handle('set-access-code', async (_e, code) => {
 });
 ipcMain.handle('set-api-key', (_e, key) => {
   if (APP_CONFIG.lab) throw new Error('真实预发 API Key 请在本地环境文件配置');
-  writeApiKey(String(key || '').trim()); schedule();
+  writeApiKey(String(key || '').trim());
+  if (readApiKey()) limits = {};
+  schedule();
 });
 ipcMain.handle('status', () => ({ lastFetch, next: nextRun, version: app.getVersion() }));
 ipcMain.handle('check-update', () => checkForUpdate());

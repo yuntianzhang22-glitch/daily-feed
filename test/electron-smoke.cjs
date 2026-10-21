@@ -22,6 +22,11 @@ app.whenReady().then(async () => {
     assert.equal((await run('api.labInfo()')).role, 'owner');
     assert.equal((await run('api.accessInfo()')).mode, 'direct');
     assert.ok((await run('api.counts()')).total > 0);
+    await run('openSettings().then(() => renderAccess())');
+    assert.equal(await run('document.getElementById("access-title").textContent'), 'API 连接');
+    assert.equal(await run('getComputedStyle(document.getElementById("access-code-row")).display'), 'none');
+    assert.doesNotMatch(await run('document.getElementById("access-hint").textContent'), /内测|月额度|充值|访问码/);
+    await run('document.getElementById("settings").close()');
     for (const [role, scenario, expected] of [
       ['beta', 'normal', 'beta'], ['beta', 'exhausted', 'beta'], ['paid', 'empty', 'paid'], ['paid', 'normal', 'paid'],
     ]) {
@@ -38,6 +43,8 @@ app.whenReady().then(async () => {
       }
       const hint = await run('document.getElementById("access-hint").textContent');
       assert.match(hint, role === 'paid' ? /余额 ¥/ : /本月额度/);
+      assert.equal(await run('document.getElementById("access-title").textContent'), '访问码');
+      assert.notEqual(await run('getComputedStyle(document.getElementById("access-code-row")).display'), 'none');
       if (role === 'paid' && scenario === 'empty') {
         await run('api.labTopup()');
         assert.ok((await run('api.accessInfo()')).balance.cny >= 10);

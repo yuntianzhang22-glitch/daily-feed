@@ -6,6 +6,13 @@ const CREDITS_PER_TWEET = 15;
 const MIN_CREDITS_PER_CALL = 15;
 const TWITTERAPI_BASE = 'https://api.twitterapi.io';
 
+// 已保存自用 Key 的用户始终使用自己的 API，旧内测码不会覆盖超管身份。
+function resolveAccess({ apiKey, relayUrl, accessCode } = {}) {
+  if (apiKey) return { mode: 'direct', apiKey };
+  if (relayUrl && accessCode) return { mode: 'relay', relayUrl, accessCode };
+  return { mode: 'none' };
+}
+
 class ApiError extends Error {
   constructor(message, status, code) {
     super(message);
@@ -115,4 +122,4 @@ function friendly(status, code, msg, body) {
   return `请求失败（${status || '网络'}）：${msg}`;
 }
 
-module.exports = { FeedClient, ApiError, CREDITS_PER_TWEET, MIN_CREDITS_PER_CALL };
+module.exports = { FeedClient, ApiError, resolveAccess, CREDITS_PER_TWEET, MIN_CREDITS_PER_CALL };

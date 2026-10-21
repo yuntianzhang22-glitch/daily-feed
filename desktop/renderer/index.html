@@ -83,15 +83,15 @@
     <form method="dialog" id="settings-form">
       <h2 id="settings-title">设置</h2>
       <section class="panel" aria-labelledby="access-title">
-        <h3 id="access-title">访问码</h3>
-        <div class="search-row">
+        <h3 id="access-title">连接设置</h3>
+        <div class="search-row" id="access-code-row" hidden>
           <input type="password" id="access-code" autocomplete="off" spellcheck="false"
                  placeholder="管理员发给你的访问码，以 df_ 开头" aria-label="访问码" />
           <button class="btn" type="button" id="save-access">验证并保存</button>
         </div>
         <p class="hint" id="access-hint"></p>
         <details id="api-key-box">
-          <summary>管理员：改用自己的 twitterapi.io API Key 直连</summary>
+          <summary id="api-key-summary">使用自己的 twitterapi.io API Key</summary>
           <div class="search-row">
             <input type="password" id="api-key" autocomplete="off" placeholder="已保存则留空不变" aria-label="API Key" />
             <button class="btn" type="button" id="save-api-key">保存</button>

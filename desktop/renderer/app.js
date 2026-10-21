@@ -699,10 +699,20 @@ async function renderAccess() {
   setHint('access-hint', '正在检查…');
   const info = await api.accessInfo();
   accessLimits = info.limits || {};
+  const ownApi = info.mode === 'direct';
+  $('access-title').textContent = ownApi || !info.relayConfigured ? 'API 连接' : '访问码';
+  $('access-code-row').hidden = ownApi || !info.relayConfigured;
+  $('api-key-summary').textContent = ownApi ? '更换 API Key' : '管理员：使用自己的 twitterapi.io API Key';
+  $('api-key-box').hidden = labContext.enabled && ownApi;
+  if (ownApi) $('api-key-box').open = false;
   // 中转只放行按关注的人搜索，关键词在中转模式下不可用
   $('keywords-box').hidden = info.mode === 'relay';
-  $('key-hint').textContent = info.hasApiKey ? '已保存（加密存储在系统钥匙串中）' : '尚未设置';
+  $('key-hint').textContent = info.hasApiKey ? '已在本机加密保存' : '尚未设置';
   updateEstimate();
+  if (ownApi) {
+    setHint('access-hint', '使用自己的 twitterapi.io API Key 直连。', 'ok');
+    return;
+  }
   if (!info.relayConfigured) {
     setHint('access-hint', '这个版本没有配置中转服务，请使用 API Key。');
     $('api-key-box').open = true;
@@ -723,8 +733,6 @@ async function renderAccess() {
     setHint('access-hint',
       `已连接（${info.name || '已验证'}${info.account_no ? `，账号 ${info.account_no}` : ''}，内测）。本月额度已用 ${usd(q.used_usd)} / ${usd(q.limit_usd)}` +
       (maxDays && maxDays < 7 ? `，每周最多抓 ${maxDays} 天` : '') + '。', 'ok');
-  } else if (info.mode === 'direct') {
-    setHint('access-hint', labContext.enabled ? '超管自用身份：API Key 直连，不受用户月额度或充值余额限制。' : '当前使用本机 API Key 直连。填写访问码后改走中转。');
   } else {
     setHint('access-hint', '还没有填写访问码。向管理员要一个，粘贴到上面。', 'warn');
   }

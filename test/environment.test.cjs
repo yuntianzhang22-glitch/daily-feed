@@ -1,7 +1,15 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { resolveEnvironment, profilePath, localCode, SCENARIOS } = require('../desktop/core/environment');
-const { FeedClient } = require('../desktop/core/client');
+const { FeedClient, resolveAccess } = require('../desktop/core/client');
+
+test('超管的自用 API Key 优先于残留内测码；仅有访问码的用户继续走中转', () => {
+  const relay = { relayUrl: 'https://relay.example', accessCode: 'df_old_beta_code' };
+  assert.deepEqual(resolveAccess({ ...relay, apiKey: 'own-key' }), { mode: 'direct', apiKey: 'own-key' });
+  assert.deepEqual(resolveAccess(relay), { mode: 'relay', ...relay });
+  assert.deepEqual(resolveAccess({ apiKey: 'own-key' }), { mode: 'direct', apiKey: 'own-key' });
+  assert.deepEqual(resolveAccess({ relayUrl: relay.relayUrl }), { mode: 'none' });
+});
 
 const appConfig = { relayUrl: 'https://production.example', updateManifestUrl: 'https://production.example/v1/latest' };
 test('非正式环境拒绝缺失服务、正式服务回退、远程控制和打包安装包', () => {
