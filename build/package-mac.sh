@@ -3,7 +3,8 @@
 # 用法: npm run dist
 # 产物:
 #   dist/Daily Feed.app                    本机直接用
-#   dist/Daily-Feed-<版本>-mac-<架构>.zip   发给同事 / 上传为更新包
+#   dist/Daily-Feed-<版本>-mac-<架构>.dmg   用户下载安装
+#   dist/Daily-Feed-<版本>-mac-<架构>.zip   应用内更新包
 #   dist/latest.json                       更新清单（url 需要指向上面 zip 的下载地址）
 # 环境变量:
 #   DAILY_FEED_DOWNLOAD_BASE  zip 的下载地址前缀，如 https://github.com/<用户>/<仓库>/releases/download/v0.2.0
@@ -84,3 +85,4 @@ require('fs').writeFileSync('dist/latest.json', JSON.stringify(m, null, 2) + '\n
 echo "完成: $OUT"
 echo "更新包: $ZIP ($((SIZE / 1048576)) MB, sha256 $SHA)"
 echo "更新清单: dist/latest.json"
+bash build/package-dmg.sh

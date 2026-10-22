@@ -4,8 +4,8 @@
 
 ## 安装
 
-1. 在 [Releases](../../releases/latest) 下载 `Daily-Feed-<版本>-mac-arm64.zip`（Apple 芯片 Mac）
-2. 解压，把 **Daily Feed** 拖进「应用程序」
+1. 在 [Releases](../../releases/latest) 下载 `Daily-Feed-<版本>-mac-arm64.dmg`（Apple 芯片 Mac）
+2. 打开 DMG，把 **Daily Feed** 拖到旁边的 **Applications（应用程序）**，然后从「应用程序」启动。若直接打开 DMG 中的应用，可点击「安装并打开」自动完成安装和重新启动
 3. 第一次打开：右键点 Daily Feed →「打开」→ 再点「打开」。如果提示"已损坏，无法打开"，在终端运行：
 
 ```bash
@@ -14,6 +14,8 @@ xattr -dr com.apple.quarantine "/Applications/Daily Feed.app"
 
 4. 未登录时启动会弹出登录窗口，输入账号编号（`DF-XXXXX`），或选择本机上次登录的账号，再点「登录」，无需密码
 5. 点「关注」，从内置名单里勾选想看的人
+
+安装完成后可以推出 DMG。首次安装或替换旧版时请先退出正在运行的 Daily Feed；自动安装在打开登录窗口和数据库前完成，已有登录和本机内容会保留。安装取消或失败时可重试或暂不安装。ZIP 文件供应用内更新使用。
 
 之后的版本在应用内更新，配置、关注列表和帖子记录都会保留。数据存在 `~/Library/Application Support/Daily Feed/`。
 启动约 5 秒后会检查更新，发现新版时弹出提醒；可立即更新或稍后，稍后仍可从侧栏或设置打开更新入口。

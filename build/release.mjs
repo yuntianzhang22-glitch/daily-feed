@@ -20,17 +20,18 @@ const tag = `v${version}`;
 const repository = 'yuntianzhang22-glitch/daily-feed';
 const source = `dist/Daily-Feed-${version}-development.zip`;
 const zip = `dist/Daily-Feed-${version}-mac-${process.arch}.zip`;
+const dmg = `dist/Daily-Feed-${version}-mac-${process.arch}.dmg`;
 process.env.DAILY_FEED_DOWNLOAD_BASE = `https://github.com/${repository}/releases/download/${tag}`;
 run('npm', ['run', 'dist']);
 run('npm', ['run', 'test:ui']);
 run('git', ['archive', '--format=zip', `--prefix=Daily-Feed-${version}-development/`, '-o', source, 'HEAD']);
 if (args.includes('--prepare-only')) {
-  console.log(`发布产物已就绪：${zip}、${source}、dist/latest.json。尚未上传或更新正式更新通道。`);
+  console.log(`发布产物已就绪：${dmg}、${zip}、${source}、dist/latest.json。尚未上传或更新正式更新通道。`);
   process.exit(0);
 }
 // 推送提交后，在该提交上打版本标签；不覆盖已有同名版本。
 const sha = run('git', ['rev-parse', 'HEAD'], { stdio: 'pipe' }).trim();
 run('git', ['push', 'origin', 'HEAD']);
-run('gh', ['release', 'create', tag, zip, source, 'dist/latest.json', '--repo', repository,
+run('gh', ['release', 'create', tag, dmg, zip, source, 'dist/latest.json', '--repo', repository,
   '--target', sha, '--title', `Daily Feed ${version}`, '--notes-file', 'docs/RELEASE_NOTES.md']);
-console.log('GitHub Release 已发布，含正式安装包和完整开发环境。验收后可显式运行 npm run relay:admin:production -- publish-update dist/latest.json 推送给正式用户。');
+console.log('GitHub Release 已发布，含 DMG 安装包、ZIP 更新包和完整开发环境。验收后可显式运行 npm run relay:admin:production -- publish-update dist/latest.json 推送给正式用户。');

@@ -20,7 +20,7 @@ fs.mkdirSync(dist, { recursive: true });
 const moves = [];
 for (const entry of fs.readdirSync(dist, { withFileTypes: true })) {
   if (!entry.isFile()) continue;
-  const match = /^Daily-Feed-(\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?)-(?:development|mac-[A-Za-z0-9_]+)\.zip$/.exec(entry.name);
+  const match = /^Daily-Feed-(\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?)-(?:development\.zip|mac-[A-Za-z0-9_]+\.(?:zip|dmg))$/.exec(entry.name);
   if (match && match[1] !== current) moves.push({ name: entry.name, group: match[1] });
   if (['RELEASE_STEPS.md', 'roster-check.json'].includes(entry.name)) moves.push({ name: entry.name, group: 'legacy' });
 }
@@ -36,5 +36,5 @@ for (const move of moves) {
   fs.renameSync(path.join(dist, move.name), target);
   console.log(`已归档：${move.name} → ${path.relative(dist, target)}`);
 }
-fs.writeFileSync(path.join(dist, 'README.md'), `# Daily Feed 发布文件\n\n当前版本：${current}。\n\n- \`Daily Feed.app\`：本机可直接打开的正式应用。\n- \`Daily-Feed-${current}-mac-*.zip\`：发给用户的安装包，解压后打开应用。\n- \`Daily-Feed-${current}-development.zip\`：对应发布版本的完整开发源码包，由发布流程生成。\n- \`latest.json\`：应用更新清单。\n- [archive](archive/)：按版本归档的历史产物；legacy 中是早期辅助文件。\n\n每次正式发布生成独立的版本安装包，历史版本保留用于回退。日常开发不需要打包；GitHub 仓库保存最新源码，Releases 保存每次正式发布的安装包及对应开发源码包。\n\n可在项目根目录运行 \`npm run dist:organize\` 再次整理。打包时会自动归档其他版本，不删除历史文件；旧版应用如需回退，可从归档安装包解压。\n`);
+fs.writeFileSync(path.join(dist, 'README.md'), `# Daily Feed 发布文件\n\n当前版本：${current}。\n\n- \`Daily Feed.app\`：本机可直接打开的正式应用。\n- \`Daily-Feed-${current}-mac-*.dmg\`：用户安装包，打开后拖入「应用程序」。\n- \`Daily-Feed-${current}-mac-*.zip\`：应用内更新包。\n- \`Daily-Feed-${current}-development.zip\`：对应发布版本的完整开发源码包，由发布流程生成。\n- \`latest.json\`：应用更新清单。\n- [archive](archive/)：按版本归档的历史产物；legacy 中是早期辅助文件。\n\n每次正式发布生成独立的版本安装包，历史版本保留用于回退。日常开发不需要打包；GitHub 仓库保存最新源码，Releases 保存每次正式发布的安装包及对应开发源码包。\n\n可在项目根目录运行 \`npm run dist:organize\` 再次整理。打包时会自动归档其他版本，不删除历史文件；旧版应用如需回退，可从归档安装包解压。\n`);
 console.log(`整理完成：dist 顶层保留 ${current}，历史产物位于 dist/archive/。`);

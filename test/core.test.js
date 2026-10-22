@@ -87,17 +87,34 @@ test('Store：能打开旧的、没有已读/收藏列的 Python 版数据库', 
   s.close();
 });
 
-test('真实数据库副本：读得出来，统计一致，不报错', { skip: !fs.existsSync(path.join(os.homedir(), 'Library/Application Support/Daily Feed/tweets.db')) }, () => {
-  const src = path.join(os.homedir(), 'Library/Application Support/Daily Feed/tweets.db');
+// 公开合成数据库：新电脑、首次安装和空账号都能运行，绝不依赖用户的帖子库。
+function databaseSnapshot() {
+  const file = path.join(tmpdir(), 'snapshot.db');
+  const s = new Store(file);
+  const media = (type, url) => ({ type, media_url_https: 'https://pbs.twimg.com/media/sample.jpg',
+    video_info: { variants: [{ content_type: 'video/mp4', url }] } });
+  s.save(tweet(1, 'alice', { extendedEntities: { media: [media('video', 'https://video.twimg.com/sample.mp4')] } }), 'user:alice', 'now');
+  s.save(tweet(2, 'bob', { quoted_tweet: tweet(3, 'alice', {
+    extendedEntities: { media: [media('photo'), media('animated_gif', 'https://video-s.twimg.com/sample.mp4')] },
+  }) }), 'user:bob', 'now');
+  s.setFlag(['1'], 'is_read', true);
+  s.setFlag(['2'], 'starred', true);
+  s.setState('last_run:group:alice,bob', '2026-10-20T01:00:00.000Z');
+  s.close(); // 检查点落盘后再复制，包含全部 WAL 中的数据。
+  return file;
+}
+
+test('数据库副本：统计、已读收藏、来源和抓取进度在重新打开后保留', () => {
+  const src = databaseSnapshot();
   const copy = path.join(tmpdir(), 'real.db');
   fs.copyFileSync(src, copy);
   const s = new Store(copy);
   const c = s.counts();
-  assert.ok(c.total > 0);
+  assert.deepStrictEqual(c, { total: 2, unread: 1, starred: 1 });
   assert.strictEqual(s.list({ limit: 1000 }).length, c.total);
   assert.ok(s.sources().every((r) => r.source.startsWith('user:') || r.source.startsWith('search:')));
   // 已有的抓取进度键能读到，升级后接着抓而不是从头开始
-  assert.ok(s.getState('last_run:group:emollick,karpathy,simonw,swyx'));
+  assert.strictEqual(s.getState('last_run:group:alice,bob'), '2026-10-20T01:00:00.000Z');
   s.close();
 });
 
@@ -382,13 +399,14 @@ test('帖子媒体：大图地址、视频 mp4 按码率排序、只接受 X 的
   assert.strictEqual(gif.sources[0].url, 'https://video.twimg.com/tweet_video/g.mp4');
 });
 
-test('真实数据库：每个视频都解析出可播放的 mp4', { skip: !fs.existsSync(path.join(os.homedir(), 'Library/Application Support/Daily Feed/tweets.db')) }, () => {
+test('数据库副本：视频、引用中的 GIF 和大图重新打开后仍可解析', () => {
   const copy = path.join(tmpdir(), 'real.db');
-  fs.copyFileSync(path.join(os.homedir(), 'Library/Application Support/Daily Feed/tweets.db'), copy);
+  fs.copyFileSync(databaseSnapshot(), copy);
   const s = new Store(copy);
   const media = s.list({ limit: 10000 }).flatMap((t) => [...(t.post?.media || []), ...(t.post?.quoted?.media || [])]);
   const videos = media.filter((m) => m.type !== 'photo');
-  assert.ok(videos.length > 0);
+  assert.strictEqual(videos.length, 2);
+  assert.strictEqual(media.filter((m) => m.type === 'photo').length, 1);
   assert.ok(videos.every((m) => m.sources.length > 0 && m.sources.every((x) => /^https:\/\/video(-s)?\.twimg\.com\//.test(x.url))));
   assert.ok(media.filter((m) => m.type === 'photo').every((m) => m.full.startsWith('https://pbs.twimg.com/')));
   s.close();

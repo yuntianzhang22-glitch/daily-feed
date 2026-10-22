@@ -164,13 +164,15 @@ npm run dist
 发布前更新版本和 `docs/RELEASE_NOTES.md`，提交完整源码，然后运行：
 
 ```bash
-npm run release -- --prepare-only   # 完整构建、测试、生成三个发布产物
+npm run release -- --prepare-only   # 完整构建、测试、生成四个发布产物
 npm run release                    # 推送提交并创建 GitHub Release
 ```
 
-Release 包含正式 `.app` 的安装 zip、`latest.json`、`Daily-Feed-<版本>-development.zip`（完整 Git 跟踪的开发仓库）。GitHub 自带 Source code 也包含全部环境源码。
+Release 包含用户下载的 `Daily-Feed-<版本>-mac-<架构>.dmg`、应用内更新用 ZIP、`latest.json`、`Daily-Feed-<版本>-development.zip`（完整 Git 跟踪的开发仓库）。GitHub 自带 Source code 也包含全部环境源码。
 
-本机 `dist/` 顶层只保留当前版本的应用、安装包、开发源码包和更新清单。打包会将其他版本的 zip 和旧更新清单移入 `dist/archive/<版本>/`，已有归档不会被覆盖；早期发布说明和名单检查文件放入 `dist/archive/legacy/`。也可单独运行 `npm run dist:organize`，按当前更新清单整理，不重新构建或改动正在运行的应用。每次正式发布都有独立安装包，保留版本号供更新校验和回退；日常源码修改无需生成安装包。
+DMG 包含正式应用、指向 `/Applications` 的入口及安装说明。macOS 正式包从其他位置启动时，先用原生对话框提供「安装并打开」，再通过 Electron `moveToApplicationsFolder` 安装并重启；成功后旧路径不继续打开数据库或界面。替换须确认，正在运行的目标拒绝替换，取消或失败不会清除用户数据。已经安装、源码运行和测试/预发外壳均不触发安装流程。
+
+本机 `dist/` 顶层只保留当前版本的应用、安装包、开发源码包和更新清单。打包会将其他版本的 ZIP、DMG 和旧更新清单移入 `dist/archive/<版本>/`，已有归档不会被覆盖；早期发布说明和名单检查文件放入 `dist/archive/legacy/`。也可单独运行 `npm run dist:organize`，按当前更新清单整理，不重新构建或改动正在运行的应用。每次正式发布都有独立安装包，保留版本号供更新校验和回退；日常源码修改无需生成安装包。
 开发源码包不带 `node_modules`、本地数据库和密钥，解压后 `npm ci && npm run dev` 即可运行。
 GitHub CLI 需已登录且具备仓库写权限，发布流程不会把本机验收服务、验收账户或运行数据打进正式安装包。
 GitHub Release 创建后，验证完成再运行下面的显式命令更新正式用户的更新通道：

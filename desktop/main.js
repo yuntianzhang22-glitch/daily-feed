@@ -14,6 +14,7 @@ const { Updater } = require('./core/updater');
 const { nextSlot, prevSlot } = require('./core/schedule');
 const { LAB_APP_NAME, resolveEnvironment, ROLES, SCENARIOS, validateProfile, profilePath, localCode } = require('./core/environment');
 const { identityFor, requirePermission, verifiedAccountRole, visibleSettings, applySettings, fetchSettings } = require('./core/permissions');
+const { ensureInstalled } = require('./core/installation');
 
 // 只有仓库内的自动验收入口可隐藏窗口；正式安装包不含这些入口。
 const sourceRoot = path.resolve(__dirname, '..');
@@ -615,6 +616,9 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', () => { if (win && !backgroundTest) { win.show(); win.focus(); } });
 
   app.whenReady().then(async () => {
+    // 只对正式安装包启用；源码、测试外壳和预发环境不移动应用或弹出安装提示。
+    const packaged = app.isPackaged && app.getAppPath() === path.join(process.resourcesPath, 'app');
+    if (packaged && !await ensureInstalled({ app, dialog, packaged })) return;
     try {
       initData();
     } catch (e) {
