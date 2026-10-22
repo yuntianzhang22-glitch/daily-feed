@@ -19,7 +19,7 @@
         <select id="lab-role"></select>
         <label for="lab-scenario">账号状态</label>
         <select id="lab-scenario"></select>
-        <button id="lab-copy-account" class="btn" type="button" hidden>复制样例登录账号</button>
+        <button id="lab-copy-account" class="btn" type="button" hidden>复制样例账号编号</button>
         <button id="lab-preview-update" class="btn" type="button">模拟更新提醒</button>
         <button id="lab-topup" class="btn" type="button" hidden>模拟转账充值 ¥10</button>
         <p id="lab-message" class="hint" role="status" aria-live="polite"></p>
@@ -81,6 +81,25 @@
     </div>
   </dialog>
 
+  <dialog id="login-dialog" class="login-dialog" aria-labelledby="login-title" aria-describedby="login-help">
+    <form id="login-form">
+      <h2 id="login-title">登录 Daily Feed</h2>
+      <p id="login-help" class="hint">输入你的账号编号即可登录，无需密码。</p>
+      <button class="previous-account" id="login-previous" type="button" aria-pressed="false" hidden>
+        <span class="hint">上次登录的账号</span>
+        <strong id="login-previous-number"></strong>
+      </button>
+      <label for="login-account">账号编号</label>
+      <input id="login-account" type="text" placeholder="例如 DF-XXXXX" autocomplete="off" spellcheck="false" maxlength="128" autofocus />
+      <p id="login-error" class="error" role="alert" hidden></p>
+      <p id="login-status" class="hint" role="status" aria-live="polite" hidden></p>
+      <div class="dialog-actions">
+        <button class="btn" type="button" id="login-cancel">稍后</button>
+        <button class="btn primary" type="submit" id="login-submit">登录</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="settings" aria-labelledby="settings-title">
     <form method="dialog" id="settings-form">
       <h2 id="settings-title">设置</h2>
@@ -88,12 +107,12 @@
         <h3 id="access-title">连接设置</h3>
         <div class="search-row" id="access-code-row" hidden>
           <input type="password" id="access-code" autocomplete="off" spellcheck="false"
-                 placeholder="粘贴你的完整登录账号" aria-label="登录账号" />
+                 placeholder="输入账号编号，例如 DF-XXXXX" aria-label="账号编号" />
           <button class="btn" type="button" id="save-access">登录</button>
         </div>
         <p class="hint" id="access-hint"></p>
         <div class="search-row" id="account-actions" hidden>
-          <button class="btn" type="button" id="copy-account">复制登录账号</button>
+          <button class="btn" type="button" id="copy-account">复制账号编号</button>
           <button class="btn" type="button" id="login-owner-account" hidden>登录独立超管账号</button>
           <button class="btn" type="button" id="logout-account">退出登录</button>
         </div>

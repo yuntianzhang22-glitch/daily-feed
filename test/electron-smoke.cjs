@@ -46,7 +46,7 @@ app.whenReady().then(async () => {
     await run(`api.setApiKey(${JSON.stringify(process.env.DAILY_FEED_LAB_KEY)})`);
     await assert.rejects(run('api.setAccessCode("df_do_not_overwrite_owner")'), /无效/);
     await run('api.copyLoginAccount()');
-    assert.equal(copiedAccount, localCode('test', 'owner', 'normal'));
+    assert.equal(copiedAccount, (await run('api.accessInfo()')).account_no);
     assert.equal((await run('api.accessInfo()')).mode, 'direct');
     await run('api.useCloudApi()');
     assert.equal((await run('api.accessInfo()')).mode, 'relay');
@@ -71,7 +71,7 @@ app.whenReady().then(async () => {
       assert.equal(await run('document.getElementById("logout-account").disabled'), false);
       const code = localCode('test', role, scenario);
       await run('copyLoginAccount()');
-      assert.equal(copiedAccount, code);
+      assert.equal(copiedAccount, (await run('api.accessInfo()')).account_no || code);
       for (const id of ['api-key-box', 'keywords-box', 'estimate-panel', 'avg-posts-field']) {
         assert.equal(await run(`getComputedStyle(document.getElementById(${JSON.stringify(id)})).display`), 'none');
       }
@@ -106,7 +106,7 @@ app.whenReady().then(async () => {
       assert.equal(await run('document.getElementById("access-code").disabled'), false);
       assert.deepEqual(await run('api.counts()'), counts);
       await run('api.labCopyAccount()');
-      assert.equal(copiedAccount, code);
+      assert.match(copiedAccount, /^DF-[A-Z0-9]{5}$/);
       await assert.rejects(run(`api.setAccessCode(${JSON.stringify(localCode('staging', role, scenario))})`), /无效/);
       await assert.rejects(run('api.setAccessCode("df_production_do_not_use")'), /无效/);
       if (scenario === 'disabled') {

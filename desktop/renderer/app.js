@@ -704,8 +704,64 @@ function loadSchedule(cfg) {
 
 let settingsCfg = null;
 let accessLimits = {};
+let loginBusy = false;
+let loginRequest = 0;
+let previousAccount = null;
+
+async function openLogin() {
+  const request = ++loginRequest;
+  previousAccount = await api.lastAccount();
+  if (request !== loginRequest) return;
+  $('settings').close();
+  $('login-account').value = '';
+  $('login-error').hidden = true;
+  $('login-status').hidden = true;
+  $('login-previous').hidden = !previousAccount;
+  $('login-previous').setAttribute('aria-pressed', 'false');
+  $('login-previous-number').textContent = previousAccount
+    ? `${previousAccount.name ? previousAccount.name + ' · ' : ''}${previousAccount.account_no}` : '';
+  if (!$('login-dialog').open) $('login-dialog').showModal();
+  $('login-account').focus();
+}
+
+async function submitLogin(event) {
+  event?.preventDefault();
+  if (loginBusy) return;
+  const number = $('login-account').value.trim();
+  if (!number) {
+    $('login-error').textContent = '请输入账号编号，或选择上次登录的账号。';
+    $('login-error').hidden = false;
+    $('login-account').focus();
+    return;
+  }
+  loginBusy = true;
+  for (const id of ['login-account', 'login-previous', 'login-submit', 'login-cancel']) $(id).disabled = true;
+  $('login-error').hidden = true;
+  $('login-status').hidden = false;
+  $('login-status').textContent = '正在登录…';
+  try {
+    await api.setAccessCode(number);
+    await renderAccess();
+    $('login-account').value = '';
+    $('login-dialog').close();
+    const status = await api.status();
+    state.nextRun = status.next;
+    setStatus(scheduleText());
+    await refreshSidebar();
+  } catch (error) {
+    $('login-error').textContent = errText(error);
+    $('login-error').hidden = false;
+  } finally {
+    loginBusy = false;
+    $('login-status').hidden = true;
+    for (const id of ['login-account', 'login-previous', 'login-submit', 'login-cancel']) $(id).disabled = false;
+    if (!$('login-dialog').open) showUpdatePrompt();
+  }
+}
 
 async function openSettings() {
+  loginRequest++;
+  $('login-dialog').close();
   const [cfg, status] = await Promise.all([api.getConfig(), api.status()]);
   settingsCfg = cfg;
   loadSchedule(cfg);
@@ -739,12 +795,11 @@ async function renderAccess() {
   const ownApi = identity.role === 'owner';
   $('access-title').textContent = info.mode === 'direct' ? 'API 连接' : '账号登录';
   $('account-help').textContent = ownApi
-    ? '完整超管登录账号可在其他设备登录；新电脑使用云端 API，无需复制本机 API Key。本机内容暂不跨设备同步。'
+    ? '账号编号可在其他设备直接登录，无需密码。本机内容暂不跨设备同步。'
     : info.mode === 'relay'
-    ? '登录状态已保存在本机。复制完整登录账号，在其他设备输入一次即可登录。登录账号请私下保管。' +
-      (identity.permissions.viewBalance ? 'DF- 开头的短编号仅用于充值备注。' : '') +
+    ? '登录状态已保存在本机。复制账号编号，在其他设备输入即可登录，无需密码。账号编号请私下保管。' +
       '本机的关注、收藏和阅读记录暂不同步。'
-    : '只需输入完整登录账号，无需密码；下次打开自动登录。登录账号请私下保管。';
+    : '输入账号编号即可登录，无需密码；也可以选择本机上次登录的账号。';
   $('api-key-summary').textContent = info.mode === 'direct' ? '更换 API Key' : '使用本机 API Key 直连（可选）';
   if (ownApi) $('api-key-box').open = false;
   $('key-hint').textContent = ownApi && info.mode === 'relay' ? '当前使用云端 API，本机 Key 可选' : info.hasApiKey ? '已在本机加密保存' : '尚未设置';
@@ -776,7 +831,7 @@ async function renderAccess() {
       `已登录（${info.name || '已验证'}${info.account_no ? `，编号 ${info.account_no}` : ''}）。本月额度已用 ${usd(q.used_usd)} / ${usd(q.limit_usd)}` +
       (maxDays && maxDays < 7 ? `，每周最多抓 ${maxDays} 天` : '') + '。', 'ok');
   } else {
-    setHint('access-hint', '粘贴你的完整登录账号即可登录；下次打开自动沿用。', 'warn');
+    setHint('access-hint', '输入你的账号编号即可登录；下次打开自动沿用。', 'warn');
   }
 }
 
@@ -803,12 +858,12 @@ async function saveAccessCode() {
 async function copyLoginAccount() {
   try {
     await api.copyLoginAccount();
-    setHint('access-hint', '登录账号已复制，可在你的其他设备上粘贴登录。请勿公开分享。', 'ok');
+    setHint('access-hint', '账号编号已复制，可在其他设备上粘贴登录。请私下保管。', 'ok');
   } catch (err) { setHint('access-hint', errText(err), 'warn'); }
 }
 
 async function logoutAccount() {
-  if (!confirm('退出后需重新输入完整登录账号。本机帖子、关注和收藏会保留。确定退出？')) return;
+  if (!confirm('退出后可输入账号编号，或选择本机上次账号重新登录。本机帖子、关注和收藏会保留。确定退出？')) return;
   const btn = $('logout-account');
   btn.disabled = true;
   try {
@@ -816,7 +871,7 @@ async function logoutAccount() {
     await renderAccess();
     settingsCfg = await api.getConfig();
     loadSchedule(settingsCfg);
-    $('access-code').focus();
+    await openLogin();
   } catch (err) { setHint('access-hint', errText(err), 'warn'); }
   finally { btn.disabled = false; }
 }
@@ -1131,7 +1186,7 @@ function renderUpdate(info, prompt = true) {
 }
 
 function showUpdatePrompt(force = false) {
-  if (updateInstalling || !updateInfo?.available) return;
+  if (updateInstalling || !updateInfo?.available || $('login-dialog').open) return;
   const dialog = $('update-dialog');
   if (!force && !dialog.open && promptedVersions.has(updateInfo.latest)) return;
   promptedVersions.add(updateInfo.latest);
@@ -1275,6 +1330,18 @@ $('cancel-settings').addEventListener('click', () => $('settings').close());
 initSchedulePickers();
 initViewer();
 $('save-access').addEventListener('click', saveAccessCode);
+$('login-form').addEventListener('submit', submitLogin);
+$('login-previous').addEventListener('click', () => {
+  if (!previousAccount || loginBusy) return;
+  $('login-account').value = previousAccount.account_no;
+  $('login-previous').setAttribute('aria-pressed', 'true');
+  $('login-error').hidden = true;
+  $('login-submit').focus();
+});
+$('login-account').addEventListener('input', () => $('login-previous').setAttribute('aria-pressed', 'false'));
+$('login-cancel').addEventListener('click', () => $('login-dialog').close());
+$('login-dialog').addEventListener('cancel', (event) => { if (loginBusy) event.preventDefault(); });
+$('login-dialog').addEventListener('close', () => { if (!loginBusy) showUpdatePrompt(); });
 $('access-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); saveAccessCode(); } });
 $('copy-account').addEventListener('click', copyLoginAccount);
 $('logout-account').addEventListener('click', logoutAccount);
@@ -1306,8 +1373,8 @@ $('cancel-follows').addEventListener('click', () => $('follows-dialog').close())
   applyIdentity(info);
   accessLimits = info.limits || {};
   if (info.mode === 'none') {
-    setStatus('请先在设置里登录账号', true);
-    openSettings();
+    setStatus('请先登录账号', true);
+    await openLogin();
   } else {
     state.nextRun = status.next;
     setStatus(info.error || scheduleText(), Boolean(info.error));

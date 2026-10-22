@@ -71,6 +71,37 @@ test('管理接口需要口令', async () => {
   assert.strictEqual((await call('/admin/topup', { method: 'POST', token: 'wrong', body: { ref: 'x', cny: 100 } })).status, 403);
 });
 
+test('DF 编号可跨设备登录三类账号；不能调用管理接口、篡改身份或绕过停用', async () => {
+  const { call, admin } = setup(okUpstream(1));
+  // 展示名即使长得像编号，也不能成为另一个登录别名。
+  await newCode(call, { name: 'DF-00000' });
+  for (const plan of ['owner', 'beta', 'paid']) {
+    const account = plan === 'owner'
+      ? await admin('/admin/owner', { code: 'df_' + 'number_login_owner_'.repeat(3), name: 'number-owner' })
+      : (await newCode(call, { plan, name: 'number-' + plan })).account;
+    const number = account.account_no;
+    for (const token of [number, number.toLowerCase().replace('-', '')]) {
+      const r = await call('/v1/status', { token });
+      assert.equal(r.status, 200);
+      const s = await r.json();
+      assert.equal(s.plan, plan);
+      assert.equal(s.account_no, number);
+      assert.ok(!('id' in s));
+      assert.equal((await call('/admin/codes', { token })).status, 403);
+    }
+    if (plan === 'paid') await admin('/admin/topup', { ref: number, cny: 10 });
+    if (plan !== 'owner') assert.equal((await call('/v1/search', { method: 'POST', token: number,
+      body: { query: 'secret keyword', role: 'owner', plan: 'owner' } })).status, 400);
+    assert.equal((await call('/v1/search', { method: 'POST', token: number, body: Q })).status, 200);
+    const s = await (await call('/v1/status', { token: number })).json();
+    assert.equal(s.quota.used_credits, 15);
+    await admin('/admin/account', { ref: number, patch: { disabled: true } });
+    assert.equal((await call('/v1/status', { token: number })).status, 401);
+    assert.equal((await call('/v1/search', { method: 'POST', token: number, body: Q })).status, 401);
+  }
+  for (const token of ['DF-00000', 'number-owner', 'x'.repeat(64)]) assert.equal((await call('/v1/status', { token })).status, 401);
+});
+
 test('独立超管仅管理口令可创建，凭证可在多设备验证，关键词和停用均由服务端校验', async () => {
   const { call, admin, calls } = setup(okUpstream(2));
   const code = 'df_' + 'owner_private_test_'.repeat(3);

@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('api', {
   saveConfig: (cfg) => ipcRenderer.invoke('save-config', cfg),
   fetchNow: () => ipcRenderer.invoke('fetch-now'),
   accessInfo: () => ipcRenderer.invoke('access-info'),
+  lastAccount: () => ipcRenderer.invoke('last-account'),
   setAccessCode: (code) => ipcRenderer.invoke('set-access-code', code),
   copyLoginAccount: () => ipcRenderer.invoke('copy-login-account'),
   setApiKey: (key) => ipcRenderer.invoke('set-api-key', key),

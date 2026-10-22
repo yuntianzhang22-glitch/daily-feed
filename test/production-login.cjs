@@ -26,6 +26,16 @@ app.whenReady().then(async () => {
     await new Promise((resolve) => win.webContents.once('did-finish-load', resolve));
     const run = (js) => win.webContents.executeJavaScript(js);
     const isHidden = (id) => run(`document.getElementById(${JSON.stringify(id)}).hidden`);
+    if (phase === 'disabled-history') {
+      await run('openLogin()');
+      await run('document.getElementById("login-previous").click(); submitLogin()');
+      assert.equal((await run('api.accessInfo()')).role, 'guest');
+      assert.equal(await run('document.getElementById("login-dialog").open'), true);
+      assert.match(await run('document.getElementById("login-error").textContent'), /无效或已停用/);
+      clearTimeout(timeout);
+      app.exit(0);
+      return;
+    }
     if (phase === 'update') {
       for (let i = 0; i < 240; i++) {
         if (await run('document.getElementById("update-dialog").open')) break;
@@ -70,7 +80,7 @@ app.whenReady().then(async () => {
       if (currentRole !== 'paid') assert.doesNotMatch(text, /充值|转账|余额/);
       if (currentRole === 'paid') assert.doesNotMatch(text, /本月额度/);
       if (currentRole === 'guest') {
-        assert.equal(await run('document.getElementById("access-code").placeholder'), '粘贴你的完整登录账号');
+        assert.equal(await run('document.getElementById("access-code").placeholder'), '输入账号编号，例如 DF-XXXXX');
       }
       if (process.env.DAILY_FEED_ENV === 'production') assert.equal(await isHidden('lab-panel'), true);
     };
@@ -78,6 +88,16 @@ app.whenReady().then(async () => {
       assert.equal((await run('api.accessInfo()')).role, 'guest');
       assert.equal((await run('api.accessInfo()')).mode, 'none');
       assert.equal(fs.existsSync(path.join(app.getPath('userData'), 'access.json')), false);
+      await run('openLogin()');
+      assert.equal((await run('api.lastAccount()')).account_no, accountNo);
+      assert.equal(await isHidden('login-previous'), false);
+      await run('document.getElementById("login-previous").click()');
+      assert.equal((await run('api.accessInfo()')).role, 'guest');
+      assert.equal(await run('document.getElementById("login-account").value'), accountNo);
+      await run('submitLogin()');
+      assert.equal((await run('api.accessInfo()')).role, role);
+      assert.equal(await run('document.getElementById("login-dialog").open'), false);
+      await run('window.confirm = () => true; logoutAccount()');
       clearTimeout(timeout);
       app.exit(0);
       return;
@@ -89,13 +109,19 @@ app.whenReady().then(async () => {
         await run('window.confirm = () => true; logoutAccount()');
       }
       assert.equal((await run('api.accessInfo()')).role, 'guest');
-      await run('openSettings().then(() => renderAccess())');
-      await checkVisibleCopy('guest');
-      assert.equal(await isHidden('access-code-row'), false);
-      // 公开的充值短编号不能用来登录，失败后仍为未登录。
-      await assert.rejects(run(`api.setAccessCode(${JSON.stringify(accountNo)})`), /无效/);
+      for (let i = 0; i < 100 && !await run('document.getElementById("login-dialog").open'); i++) await new Promise((r) => setTimeout(r, 20));
+      assert.equal(await run('document.getElementById("login-dialog").open'), true);
+      if (phase === 'first' && process.env.DAILY_FEED_ENV === 'production') assert.equal(await isHidden('login-previous'), true);
+      await run('submitLogin()');
+      assert.match(await run('document.getElementById("login-error").textContent'), /请输入账号编号/);
+      const previous = await run('api.lastAccount()');
+      await run('document.getElementById("login-account").value="DF-00000"; submitLogin()');
       assert.equal((await run('api.accessInfo()')).role, 'guest');
-      await run(`document.getElementById('access-code').value = ${JSON.stringify(code)}; saveAccessCode()`);
+      assert.deepEqual(await run('api.lastAccount()'), previous);
+      assert.equal(await run('document.getElementById("login-dialog").open'), true);
+      await run(`document.getElementById('login-account').value = ${JSON.stringify(accountNo.toLowerCase())}; submitLogin()`);
+      assert.equal(await run('document.getElementById("login-dialog").open'), false);
+      await run('openSettings().then(() => renderAccess())');
     } else {
       // 第二次启动同一数据目录，不输入任何凭证。
       assert.equal((await run('api.accessInfo()')).role, role);
@@ -122,10 +148,10 @@ app.whenReady().then(async () => {
       await assert.rejects(run('api.useCloudApi()'), /权限不足/);
     }
     await run('copyLoginAccount()');
-    assert.equal(copiedAccount, code);
+    assert.equal(copiedAccount, accountNo);
     if (phase === 'first') {
       await run('api.saveConfig({follows:["naval"],schedule_enabled:false})');
-      assert.equal(JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'access.json'))).code, code);
+      assert.equal(JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'access.json'))).code, accountNo);
       if (role === 'owner') {
         await run(`api.setApiKey(${JSON.stringify(process.env.LOGIN_SMOKE_DIRECT_KEY)})`);
         assert.equal((await run('api.accessInfo()')).mode, 'direct');
@@ -144,11 +170,11 @@ app.whenReady().then(async () => {
       const loggedOut = await run('api.accessInfo()');
       assert.equal(loggedOut.role, 'guest');
       assert.deepEqual(loggedOut.limits, {});
-      assert.equal(await isHidden('access-code-row'), false);
+      assert.equal(await run('document.getElementById("login-dialog").open'), true);
       assert.equal(await isHidden('account-actions'), true);
       assert.deepEqual((await run('api.getConfig()')).follows, before.follows);
       assert.equal(loggedOut.mode, 'none');
-      await checkVisibleCopy('guest');
+      assert.doesNotMatch(await run('document.getElementById("login-dialog").innerText'), /API|管理员|超管|内测|付费/);
       await assert.rejects(run('api.setApiKey("cannot-promote-after-logout")'), /权限不足/);
       assert.equal(fs.existsSync(path.join(app.getPath('userData'), 'access.json')), false);
       await assert.rejects(run('api.copyLoginAccount()'), /请先登录/);

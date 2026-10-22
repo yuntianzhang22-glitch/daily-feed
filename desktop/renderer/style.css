@@ -386,6 +386,15 @@ progress { width: 100%; height: 6px; accent-color: var(--accent); }
 }
 .update-banner:hover { background: #10202d; }
 .update-dialog { width: min(440px, 92vw); }
+.login-dialog { width: min(400px, 92vw); }
+.login-dialog h2, .login-dialog p { margin: 0; }
+.previous-account {
+  display: grid; gap: 6px; padding: 14px; width: 100%; text-align: left;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text); cursor: pointer;
+}
+.previous-account[hidden] { display: none; }
+.previous-account[aria-pressed="true"] { border-color: var(--accent); }
+.previous-account strong { font-size: 15px; overflow-wrap: anywhere; }
 .update-dialog h2, .update-dialog p { margin: 0; }
 #update-dialog-version { font-size: 15px; line-height: 1.6; }
 #update-dialog-notes { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; overflow-y: auto; }

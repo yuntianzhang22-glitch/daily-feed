@@ -3,6 +3,7 @@ const {
   app, BrowserWindow, clipboard, dialog, ipcMain, net, Notification, powerMonitor, safeStorage, shell,
 } = require('electron');
 const fs = require('fs');
+const crypto = require('crypto');
 const path = require('path');
 
 const { Store } = require('./core/store');
@@ -49,6 +50,7 @@ const P = {
   config: () => path.join(userData(), 'config.json'),
   access: () => path.join(userData(), 'access.json'),
   signedOut: () => path.join(userData(), 'signed_out'),
+  lastAccount: () => path.join(userData(), 'last_account.json'),
   apiKey: () => path.join(userData(), 'api_key.bin'),
   lastAuto: () => path.join(userData(), 'last_auto_fetch.txt'),
   rosterCache: () => path.join(userData(), 'roster-cache.json'),
@@ -65,6 +67,7 @@ let fetching = false;
 let limits = {};
 let updater = null;
 let pendingUpdate = null;
+let authRevision = 0;
 
 // ------------------------------------------------------------ 数据
 
@@ -120,15 +123,29 @@ function readAccess() {
   try { return JSON.parse(fs.readFileSync(P.access(), 'utf8')); } catch { return {}; }
 }
 
+function lastAccount() {
+  try {
+    const saved = JSON.parse(fs.readFileSync(P.lastAccount(), 'utf8'));
+    if (saved.relayUrl !== APP_CONFIG.relayUrl || !/^DF-[A-Z0-9]{5}$/.test(saved.account_no)) return null;
+    return { account_no: saved.account_no, name: saved.name || '' };
+  } catch { return null; }
+}
+
+function rememberAccount(s) {
+  if (!/^DF-[A-Z0-9]{5}$/.test(s.account_no || '')) return;
+  fs.writeFileSync(P.lastAccount(), JSON.stringify({ relayUrl: APP_CONFIG.relayUrl, account_no: s.account_no, name: s.name || '' }), { mode: 0o600 });
+}
+
 // 访问码本身可随时停用，存普通文件即可，避免每次更新后钥匙串弹窗
-function writeAccess(code, plan, { accountLogin = readAccess().accountLogin } = {}) {
+function writeAccess(code, plan, { accountLogin = readAccess().accountLogin, account = readAccess() } = {}) {
   if (!code) {
     // 保留加密 Key，但明确退出，防止账号退出后自动回退为本机超管。
     fs.writeFileSync(P.signedOut(), '1', { mode: 0o600 });
     fs.rmSync(P.access(), { force: true });
     return;
   }
-  fs.writeFileSync(P.access(), JSON.stringify({ code, accountLogin: Boolean(accountLogin), ...(plan ? { plan: verifiedAccountRole(plan) } : {}) }), { mode: 0o600 });
+  fs.writeFileSync(P.access(), JSON.stringify({ code, accountLogin: Boolean(accountLogin),
+    account_no: account.account_no, name: account.name, ...(plan ? { plan: verifiedAccountRole(plan) } : {}) }), { mode: 0o600 });
   fs.rmSync(P.signedOut(), { force: true });
 }
 
@@ -189,7 +206,8 @@ async function refreshLimits() {
   if (P.access() !== accessFile || activeAccount()?.code !== session.code) {
     throw new Error('登录状态已变更，请重试');
   }
-  writeAccess(session.code, plan);
+  writeAccess(session.code, plan, { account: s });
+  rememberAccount(s);
   limits = s.limits || {};
   return s;
 }
@@ -394,9 +412,16 @@ function labInfo() {
 }
 
 ipcMain.handle('lab-info', () => labInfo());
-ipcMain.handle('lab-copy-account', () => {
+ipcMain.handle('lab-copy-account', async () => {
   if (!APP_CONFIG.lab) throw new Error('正式环境不开放验收控制');
-  clipboard.writeText(localCode(APP_CONFIG.name, APP_CONFIG.role, APP_CONFIG.scenario));
+  const id = crypto.createHash('sha256').update(localCode(APP_CONFIG.name, APP_CONFIG.role, APP_CONFIG.scenario)).digest('hex');
+  const r = await netFetch(`${APP_CONFIG.relayUrl}/admin/codes`, {
+    headers: { Authorization: `Bearer ${process.env.DAILY_FEED_LAB_TOKEN}` }, signal: AbortSignal.timeout(15000),
+  });
+  if (!r.ok) throw new Error('读取样例账号失败');
+  const account = (await r.json()).accounts.find((a) => a.id === id);
+  if (!account) throw new Error('没有找到样例账号');
+  clipboard.writeText(account.account_no);
   return { ok: true };
 });
 ipcMain.handle('lab-preview-update', async () => {
@@ -415,6 +440,7 @@ ipcMain.handle('lab-profile', async (_e, { role, scenario }) => {
   if (!APP_CONFIG.lab) throw new Error('正式环境不开放验收控制');
   if (fetching) throw new Error('请等待本次抓取完成后再切换身份');
   validateProfile(role, scenario);
+  authRevision++;
   clearTimeout(timer);
   store.close();
   APP_CONFIG.role = role;
@@ -472,19 +498,23 @@ ipcMain.handle('access-info', async () => {
   if (!identity.permissions.viewBalance) delete info.balance;
   return { ...info, ...identity };
 });
+ipcMain.handle('last-account', () => lastAccount());
 ipcMain.handle('set-access-code', async (_e, code) => {
   authorize('configureAccessCode');
   if (fetching) throw new Error('请等待当前抓取完成后再登录或退出');
   code = String(code || '').trim();
+  const revision = ++authRevision;
+  if (/^DF-?[A-Z0-9]{5}$/i.test(code)) code = code.toUpperCase().replace(/^DF-?/, 'DF-');
   if (!code) { writeAccess(null); limits = {}; schedule(); return { ok: true }; }
   if (!APP_CONFIG.relayUrl) throw new Error('账号服务暂不可用，请联系支持');
   // 先验证再保存
   const client = new FeedClient({ mode: 'relay', relayUrl: APP_CONFIG.relayUrl, accessCode: code, fetchImpl: netFetch });
   const accessFile = P.access();
   const s = await client.status();
-  if (P.access() !== accessFile) throw new Error('验收样例已切换，请重新登录');
+  if (P.access() !== accessFile || revision !== authRevision) throw new Error('登录状态已变更，请重新登录');
   if (fetching) throw new Error('请等待当前抓取完成后再登录或退出');
-  writeAccess(code, verifiedAccountRole(s.plan), { accountLogin: true });
+  writeAccess(s.account_no || code, verifiedAccountRole(s.plan), { accountLogin: true, account: s });
+  rememberAccount(s);
   limits = s.limits || {};
   // 立即按新的限制修正已有配置（比如最短间隔）
   config.save(config.load(), limits);
@@ -494,7 +524,8 @@ ipcMain.handle('set-access-code', async (_e, code) => {
 // 登录账号本身是私密凭证。只在用户主动复制时写入剪贴板，不传回页面或状态接口。
 ipcMain.handle('copy-login-account', () => {
   authorize('configureAccessCode');
-  const code = activeAccount()?.code;
+  const saved = activeAccount();
+  const code = saved?.account_no || saved?.code;
   if (!code) throw new Error('请先登录账号');
   clipboard.writeText(code);
   return { ok: true };

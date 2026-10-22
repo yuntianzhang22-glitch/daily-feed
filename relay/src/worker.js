@@ -68,8 +68,10 @@ async function sha256(text) {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-// 账本里只存访问码的哈希，泄露了也拿不到原始访问码
+// DF 编号即登录凭证；保留旧长凭证兼容已有安装版本。只接受编号，不允许按名字登录。
 async function codeId(request) {
+  const number = /^Bearer\s+(DF-?[A-Z0-9]{5})$/i.exec(request.headers.get('Authorization') || '');
+  if (number) return number[1].toUpperCase().replace(/^DF-?/, 'DF-');
   const m = /^Bearer\s+(\S{16,128})$/.exec(request.headers.get('Authorization') || '');
   return m ? sha256(m[1]) : null;
 }
@@ -90,6 +92,10 @@ function denied(r) {
 // 老凭证按需迁移，避免部署到批量迁移完成之间出现登录空窗；不覆盖已有账本数据。
 async function accountStatus(book, env, id) {
   const current = await book.call('status', id);
+  if (/^DF-/.test(id)) {
+    if (current.error) return current;
+    return current.account_no === id ? current : { error: 'not_found' };
+  }
   if (current.error !== 'not_found') return current;
   const raw = await env.ACCESS.get(`code:${id}`);
   if (!raw) return current;

@@ -57,8 +57,12 @@ try {
       // 重启本地 Worker 及客户端，退出状态仍不能被自动注入的样例身份覆盖。
       await lab.close();
       labClosed = true;
-      const restarted = await startLab({ root: serverRoot, environment: serverEnvironment });
-      try { await device(restarted, environment, code, account, 'logout-restart', deviceB, 40); }
+      const restarted = await startLab({ root: serverRoot, environment: serverEnvironment, port: Number(new URL(lab.url).port) });
+      try {
+        await device(restarted, environment, code, account, 'logout-restart', deviceB, 40);
+        restarted.ledger.update(account.account_no, { disabled: true });
+        await device(restarted, environment, code, account, 'disabled-history', deviceB, 40);
+      }
       finally { await restarted.close(); }
       console.log(`${environment}/${role} login parity passed: 两台设备、独立账号、云端/本机 API、退出后重启、权限隔离、本地设置独立`);
     } finally { if (!labClosed) await lab.close(); }

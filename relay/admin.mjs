@@ -134,7 +134,10 @@ try {
     });
     const a = r.account;
     console.log(`已创建${plan === 'paid' ? '付费' : '内测'}账号：${a.name}  账号 ${a.account_no}`);
-    console.log(`登录账号（无需密码，只显示这一次，请私下发给对方）：${r.code}`);
+    const file = new URL(`../.local/issued-accounts/${a.account_no}.json`, import.meta.url);
+    fs.mkdirSync(new URL('../.local/issued-accounts/', import.meta.url), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(file, JSON.stringify(r, null, 2), { mode: 0o600, flag: 'wx' });
+    console.log(`登录时输入账号编号 ${a.account_no}，无需密码；账号编号请私下保管。兼容凭证已单独保存。`);
     if (plan === 'paid') console.log(`余额为 0。对方转账时备注账号 ${a.account_no}，收到后运行：node relay/admin.mjs topup ${a.account_no} <金额>`);
   } else if (cmd === 'list') {
     const r = await call('/admin/codes');
