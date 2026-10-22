@@ -20,6 +20,7 @@
     "relay:deploy:production": "wrangler deploy --config relay/wrangler.toml",
     "release": "node build/release.mjs",
     "icon": "electron build/make-icon.js",
+    "dist:organize": "node build/organize-dist.mjs",
     "dist": "npm test && bash build/package-mac.sh"
   },
   "devDependencies": {

@@ -53,6 +53,7 @@ npm run dev
 - `npm run start:production`：正式服务和正式数据
 - `npm test` / `npm run test:ui`：业务测试 / 后台运行的实际 Electron 页面验收，不弹窗或抢焦点
 - `npm run release`：构建、验证并上传正式安装包及完整开发源码包到 GitHub
+- `npm run dist:organize`：整理本机发布文件；当前版本留在 `dist/`，旧版本保留在 `dist/archive/`
 
 完整的隔离规则、账号状态、真实 API 联调、远程预发部署和发布步骤见 [环境说明](docs/ENVIRONMENTS.md)。
 

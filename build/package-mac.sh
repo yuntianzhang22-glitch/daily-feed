@@ -24,6 +24,8 @@ ZIP="dist/Daily-Feed-$VERSION-mac-$ARCH.zip"
 [ -d "$SRC_APP" ] || { echo "找不到 $SRC_APP，请先 npm install"; exit 1; }
 [ -f build/icon.png ] || { echo "找不到 build/icon.png，请先 npm run icon"; exit 1; }
 
+# 保留旧安装包和更新清单，顶层只展示本次构建的版本。
+node build/organize-dist.mjs --version "$VERSION"
 rm -rf "$OUT" "$ZIP"
 mkdir -p dist
 ditto "$SRC_APP" "$OUT"
