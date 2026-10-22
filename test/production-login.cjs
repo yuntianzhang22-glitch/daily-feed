@@ -19,10 +19,19 @@ const code = process.env.LOGIN_SMOKE_ACCOUNT;
 const accountNo = process.env.LOGIN_SMOKE_NUMBER;
 const role = process.env.LOGIN_SMOKE_ROLE;
 const timeout = setTimeout(() => { console.error('Production login timeout'); app.exit(1); }, 30000);
+// 自动验收全程不得显示窗口或抢焦点（包括重载和模态弹窗）。
+app.on('browser-window-created', (_event, window) => {
+  for (const event of ['show', 'focus']) window.on(event, () => {
+    console.error(`后台验收意外触发窗口 ${event}`);
+    app.exit(1);
+  });
+});
 require('../desktop/main');
 app.whenReady().then(async () => {
   try {
     const win = BrowserWindow.getAllWindows()[0];
+    assert.equal(win.isVisible(), false);
+    assert.equal(win.isFocused(), false);
     await new Promise((resolve) => win.webContents.once('did-finish-load', resolve));
     const run = (js) => win.webContents.executeJavaScript(js);
     const isHidden = (id) => run(`document.getElementById(${JSON.stringify(id)}).hidden`);

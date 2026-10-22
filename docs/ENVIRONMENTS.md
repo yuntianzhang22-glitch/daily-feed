@@ -159,6 +159,8 @@ npm run dist
 
 测试包括真实本机 HTTP、Worker、SQLite 账本、实际 Electron 页面和身份切换。CI 从干净 GitHub checkout 安装依赖，缺失中转文件会直接失败。
 
+`npm run test:ui` 使用独立的后台运行时，窗口始终隐藏；macOS 不显示 Dock 图标。验收会监测窗口显示和焦点事件，任何意外弹窗或抢焦点都会失败。后台模式只由源码中的自动验收入口启用，`npm run dev` / `npm run staging` 仍正常显示窗口，供人工操作；正式安装包不包含这些验收入口。
+
 发布前更新版本和 `docs/RELEASE_NOTES.md`，提交完整源码，然后运行：
 
 ```bash

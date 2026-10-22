@@ -7,15 +7,25 @@ const assert = require('node:assert/strict');
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'daily-feed-permissions-'));
 for (const key of Object.keys(process.env)) if (key.startsWith('DAILY_FEED_')) delete process.env[key];
 Object.assign(process.env, {
+  DAILY_FEED_AUTOMATED_TEST: '1',
   DAILY_FEED_ENV: 'production', DAILY_FEED_USER_DATA: dir,
   DAILY_FEED_RELAY: 'http://127.0.0.1:1', DAILY_FEED_MANIFEST: 'http://127.0.0.1:1/v1/latest',
   DAILY_FEED_ROSTER: 'http://127.0.0.1:1/v1/roster',
+});
+// 自动验收全程不得显示窗口或抢焦点（包括重载和模态弹窗）。
+app.on('browser-window-created', (_event, window) => {
+  for (const event of ['show', 'focus']) window.on(event, () => {
+    console.error(`后台验收意外触发窗口 ${event}`);
+    app.exit(1);
+  });
 });
 require('../desktop/main');
 const timeout = setTimeout(() => { console.error('Production permission smoke timeout'); app.exit(1); }, 20000);
 app.whenReady().then(async () => {
   try {
     const win = BrowserWindow.getAllWindows()[0];
+    assert.equal(win.isVisible(), false);
+    assert.equal(win.isFocused(), false);
     await new Promise((resolve) => win.webContents.once('did-finish-load', resolve));
     const run = (code) => win.webContents.executeJavaScript(code);
     const info = await run('api.accessInfo()');

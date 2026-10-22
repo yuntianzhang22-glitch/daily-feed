@@ -51,7 +51,7 @@ npm run dev
 - `npm run staging`：独立的预发验收环境
 - `npm run staging:live`：显式配置自己的预发 API Key 后，联调真实抓取
 - `npm run start:production`：正式服务和正式数据
-- `npm test` / `npm run test:ui`：业务测试 / 实际 Electron 页面验收
+- `npm test` / `npm run test:ui`：业务测试 / 后台运行的实际 Electron 页面验收，不弹窗或抢焦点
 - `npm run release`：构建、验证并上传正式安装包及完整开发源码包到 GitHub
 
 完整的隔离规则、账号状态、真实 API 联调、远程预发部署和发布步骤见 [环境说明](docs/ENVIRONMENTS.md)。

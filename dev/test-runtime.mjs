@@ -7,7 +7,7 @@ import { createRequire } from 'node:module';
 import environmentConfig from '../desktop/core/environment.js';
 
 const require = createRequire(import.meta.url);
-export function testRuntime(repo, environment) {
+export function testRuntime(repo, environment, { background = false } = {}) {
   const electron = require('electron');
   if (process.platform !== 'darwin') return electron;
   if (!['test', 'staging'].includes(environment)) throw new Error('测试运行时不能用于正式环境');
@@ -16,6 +16,7 @@ export function testRuntime(repo, environment) {
   const fingerprint = crypto.createHash('sha256')
     .update(fs.readFileSync(new URL(import.meta.url)))
     .update(fs.readFileSync(icon)).update(pkg.version).update(require('electron/package.json').version)
+    .update(background ? 'background-test' : 'interactive')
     .digest('hex').slice(0, 12);
   const root = path.join(repo, '.local/runtime', `${environment}-${fingerprint}`);
   const bundle = path.join(root, `${environmentConfig.LAB_APP_NAME}.app`);
@@ -35,9 +36,10 @@ export function testRuntime(repo, environment) {
     CFBundleName: environmentConfig.LAB_APP_NAME, CFBundleDisplayName: environmentConfig.LAB_APP_NAME,
     CFBundleExecutable: environmentConfig.LAB_APP_NAME, CFBundleIdentifier: `local.dailyfeed.${environment}`,
     CFBundleShortVersionString: pkg.version, CFBundleVersion: pkg.version,
+    ...(background ? { LSUIElement: 'true' } : {}),
   })) {
     try { run('/usr/libexec/PlistBuddy', ['-c', `Set :${key} ${value}`, plist]); }
-    catch { run('/usr/libexec/PlistBuddy', ['-c', `Add :${key} string ${value}`, plist]); }
+    catch { run('/usr/libexec/PlistBuddy', ['-c', `Add :${key} ${key === 'LSUIElement' ? 'bool' : 'string'} ${value}`, plist]); }
   }
   const iconset = fs.mkdtempSync(path.join(root, 'icons-')) + '/app.iconset';
   fs.mkdirSync(iconset);

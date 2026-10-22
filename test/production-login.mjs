@@ -3,12 +3,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import { startLab } from '../dev/lab-server.mjs';
 import profiles from '../desktop/core/environment.js';
+import { testRuntime } from '../dev/test-runtime.mjs';
 
-const require = createRequire(import.meta.url);
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'daily-feed-login-'));
+const repo = fileURLToPath(new URL('..', import.meta.url));
+const electron = testRuntime(repo, 'test', { background: true });
 // 正式入口测试由 Electron CLI 启动，OS 版本号可能是运行时版本；样例始终高于两者。
 const nextVersion = '999.0.0';
 async function device(lab, environment, code, account, phase, directory, balance) {
@@ -18,19 +20,25 @@ async function device(lab, environment, code, account, phase, directory, balance
     DAILY_FEED_RELAY: lab.url, DAILY_FEED_MANIFEST: `${lab.url}/v1/latest`, DAILY_FEED_ROSTER: `${lab.url}/v1/roster`,
     LOGIN_SMOKE_PHASE: phase, LOGIN_SMOKE_ACCOUNT: code, LOGIN_SMOKE_NUMBER: account.account_no,
     LOGIN_SMOKE_BALANCE: String(balance), LOGIN_SMOKE_ROLE: account.plan, LOGIN_SMOKE_DIRECT_KEY: lab.directKey,
+    DAILY_FEED_AUTOMATED_TEST: '1',
   });
   if (environment !== 'production') Object.assign(env, {
     DAILY_FEED_ROLE: account.plan, DAILY_FEED_SCENARIO: 'normal', DAILY_FEED_LAB_URL: lab.url,
     DAILY_FEED_LAB_TOKEN: lab.token, DAILY_FEED_LAB_ROOT: path.join(root, environment, directory),
     DAILY_FEED_LAB_KEY: lab.directKey, DAILY_FEED_LAB_DIRECT_BASE: lab.directBase,
   });
-  const child = spawn(require('electron'), ['test/production-login.cjs'], { env, stdio: 'inherit' });
+  const child = spawn(electron, [path.join(repo, 'test/production-login.cjs')], { env, stdio: 'inherit' });
   await new Promise((resolve, reject) => {
     child.once('error', reject);
     child.once('exit', (exitCode) => exitCode === 0 ? resolve() : reject(new Error(`登录验收失败：${phase}`)));
   });
 }
 try {
+  const permissions = spawn(electron, [path.join(repo, 'test/production-permissions.cjs')], { stdio: 'inherit' });
+  await new Promise((resolve, reject) => {
+    permissions.once('error', reject);
+    permissions.once('exit', (code) => code === 0 ? resolve() : reject(new Error('正式权限验收失败')));
+  });
   for (const environment of ['production', 'test', 'staging']) for (const role of ['owner', 'beta', 'paid']) {
     const serverEnvironment = environment === 'production' ? 'test' : environment;
     const serverRoot = path.join(root, environment, role, 'server');

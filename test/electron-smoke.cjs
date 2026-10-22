@@ -11,12 +11,21 @@ safeStorage.decryptString = (buffer) => {
   assert.ok(buffer.toString().startsWith('smoke-test:'));
   return buffer.toString().slice('smoke-test:'.length);
 };
+// 自动验收全程不得显示窗口或抢焦点（包括重载和模态弹窗）。
+app.on('browser-window-created', (_event, window) => {
+  for (const event of ['show', 'focus']) window.on(event, () => {
+    console.error(`后台验收意外触发窗口 ${event}`);
+    app.exit(1);
+  });
+});
 require('../desktop/main');
 
 const timeout = setTimeout(() => { console.error('UI smoke timeout'); app.exit(1); }, 45000);
 app.whenReady().then(async () => {
   try {
     const win = BrowserWindow.getAllWindows()[0];
+    assert.equal(win.isVisible(), false);
+    assert.equal(win.isFocused(), false);
     const waitLoaded = () => new Promise((resolve) => win.webContents.once('did-finish-load', resolve));
     await waitLoaded();
     const run = (code) => win.webContents.executeJavaScript(code);

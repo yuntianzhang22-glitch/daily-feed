@@ -15,15 +15,19 @@ const { nextSlot, prevSlot } = require('./core/schedule');
 const { LAB_APP_NAME, resolveEnvironment, ROLES, SCENARIOS, validateProfile, profilePath, localCode } = require('./core/environment');
 const { identityFor, requirePermission, verifiedAccountRole, visibleSettings, applySettings, fetchSettings } = require('./core/permissions');
 
+// 只有仓库内的自动验收入口可隐藏窗口；正式安装包不含这些入口。
+const sourceRoot = path.resolve(__dirname, '..');
+const testHarness = ['electron-smoke.cjs', 'production-login.cjs', 'production-permissions.cjs']
+  .some((file) => process.argv[1] === path.join(sourceRoot, 'test', file) && fs.existsSync(process.argv[1]));
+const backgroundTest = testHarness && process.env.DAILY_FEED_AUTOMATED_TEST === '1';
+
 // 构建时写入的服务地址（中转、更新清单、名单）。开发时可以用环境变量覆盖。
 const APP_CONFIG = (() => {
   let cfg = {};
   try { cfg = JSON.parse(fs.readFileSync(path.join(__dirname, 'app-config.json'), 'utf8')); } catch { /* 无 */ }
   // 自定义 macOS 测试外壳会被 Electron 标为 packaged；只允许它从本仓库加载源码。
   // 正式安装包在 Resources/app 下，没有源码开发入口，也不能使用本地验收身份。
-  const sourceRoot = path.resolve(__dirname, '..');
-  const sourceEntry = app.getAppPath() === sourceRoot
-    || process.argv[1] === path.join(sourceRoot, 'test', 'electron-smoke.cjs');
+  const sourceEntry = app.getAppPath() === sourceRoot || testHarness;
   const developmentRuntime = sourceEntry
     && process.execPath.startsWith(path.join(sourceRoot, '.local', 'runtime') + path.sep)
     && fs.existsSync(path.join(sourceRoot, 'dev', 'start.mjs'));
@@ -564,6 +568,7 @@ ipcMain.handle('reveal-data', () => shell.openPath(userData()));
 
 function createWindow() {
   win = new BrowserWindow({
+    show: !backgroundTest,
     width: 1100,
     height: 760,
     minWidth: 760,
@@ -572,6 +577,7 @@ function createWindow() {
     titleBarStyle: 'hiddenInset',
     backgroundColor: '#0f1419',
     webPreferences: {
+      backgroundThrottling: !backgroundTest,
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
@@ -606,13 +612,14 @@ function alignScheduleTime() {
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', () => { if (win) { win.show(); win.focus(); } });
+  app.on('second-instance', () => { if (win && !backgroundTest) { win.show(); win.focus(); } });
 
   app.whenReady().then(async () => {
     try {
       initData();
     } catch (e) {
-      dialog.showErrorBox('Daily Feed 无法启动', `读取数据失败：${e.message}\n\n数据目录：${userData()}`);
+      if (backgroundTest) console.error('Daily Feed 无法启动：', e.message);
+      else dialog.showErrorBox('Daily Feed 无法启动', `读取数据失败：${e.message}\n\n数据目录：${userData()}`);
       app.quit();
       return;
     }
@@ -630,7 +637,7 @@ if (!app.requestSingleInstanceLock()) {
   });
 }
 
-app.on('activate', () => { if (win) win.show(); });
+app.on('activate', () => { if (win && !backgroundTest) win.show(); });
 app.on('before-quit', () => {
   app.isQuitting = true;
   clearTimeout(timer);

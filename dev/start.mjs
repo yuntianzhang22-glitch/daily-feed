@@ -48,9 +48,10 @@ Object.assign(env, {
   DAILY_FEED_LAB_URL: lab.url, DAILY_FEED_LAB_TOKEN: lab.token, DAILY_FEED_LIVE: live ? '1' : '0',
   DAILY_FEED_LAB_ROOT: root,
   DAILY_FEED_LAB_KEY: lab.directKey, DAILY_FEED_LAB_DIRECT_BASE: lab.directBase,
+  ...(smoke ? { DAILY_FEED_AUTOMATED_TEST: '1' } : {}),
 });
 console.log(`${environment === 'test' ? '测试' : '预发'}环境 · ${live ? '真实 API（会产生接口费用）' : '合成数据（不调用外部 API）'}\n${lab.url}\n界面内可切换三类身份和异常状态；数据：${root}/${environment}`);
-const electron = testRuntime(repo, environment);
+const electron = testRuntime(repo, environment, { background: smoke });
 const child = spawn(electron, [smoke ? path.join(repo, 'test/electron-smoke.cjs') : repo], { cwd: repo, env, stdio: 'inherit' });
 let closing = false;
 async function close(code = 0) {
