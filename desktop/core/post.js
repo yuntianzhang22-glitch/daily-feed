@@ -12,32 +12,53 @@ function cp(text) {
   return Array.from(String(text || ''));
 }
 
-// 正文：只保留 X 界面上显示的那段（displayTextRange），
-// 把 t.co 短链换成真实地址的显示文本；图片和指向被引用帖子的链接直接去掉（下面单独显示）
+// 长帖的 text 已是全文，但预览范围和链接坐标可能仍属于旧的 280 字符版本。
+// 只替换实际存在的短链；绝不能按过期坐标删除正文里的普通文字。
+function entityRanges(entity, chars) {
+  const url = typeof entity.url === 'string' ? entity.url : '';
+  const [a, b] = Array.isArray(entity.indices) ? entity.indices : [];
+  const valid = Number.isInteger(a) && Number.isInteger(b) && a >= 0 && b > a && b <= chars.length;
+  if (valid) {
+    const token = chars.slice(a, b).join('');
+    if (url ? token === url : /^https?:\/\/t\.co\/[A-Za-z0-9]+$/.test(token)) return [{ a, b }];
+  }
+  if (!url) return [];
+  const text = chars.join('');
+  const matches = [];
+  for (let at = text.indexOf(url); at !== -1; at = text.indexOf(url, at + url.length)) {
+    // 避免把短链 ABC 误当成 ABCDEF 的一部分。
+    if (/[A-Za-z0-9]/.test(text[at + url.length] || '')) continue;
+    const start = cp(text.slice(0, at)).length;
+    matches.push({ a: start, b: start + cp(url).length });
+  }
+  return matches;
+}
+
+// 保留全文，仅沿用范围起点隐藏回复对象；媒体及引用短链通过实际 URL 移除。
 function bodyOf(t) {
   const chars = cp(t.text);
-  const range = Array.isArray(t.displayTextRange) && t.displayTextRange.length === 2
-    ? t.displayTextRange : [0, chars.length];
-  const start = Math.max(0, range[0]);
-  const end = Math.min(chars.length, range[1]);
+  const from = Array.isArray(t.displayTextRange) ? t.displayTextRange[0] : 0;
+  const start = Number.isInteger(from) && from >= 0 && from <= chars.length ? from : 0;
+  const end = chars.length;
   const media = (t.extendedEntities && t.extendedEntities.media) || (t.entities && t.entities.media) || [];
   const urls = (t.entities && t.entities.urls) || [];
   const quotedUrl = t.quoted_tweet && t.quoted_tweet.url;
 
   const edits = [];
   for (const m of media) {
-    if (Array.isArray(m.indices)) edits.push({ a: m.indices[0], b: m.indices[1], text: '' });
+    for (const range of entityRanges(m, chars)) edits.push({ ...range, text: '' });
   }
   const links = [];
   for (const u of urls) {
-    if (!Array.isArray(u.indices)) continue;
+    const ranges = entityRanges(u, chars).filter((range) => range.a >= start);
+    if (!ranges.length) continue;
     const href = u.expanded_url || u.url;
     if (quotedUrl && isSamePost(href, quotedUrl)) {
-      edits.push({ a: u.indices[0], b: u.indices[1], text: '' });
+      for (const range of ranges) edits.push({ ...range, text: '' });
       continue;
     }
     const display = u.display_url || href;
-    edits.push({ a: u.indices[0], b: u.indices[1], text: display });
+    for (const range of ranges) edits.push({ ...range, text: display });
     links.push({ url: href, display });
   }
 

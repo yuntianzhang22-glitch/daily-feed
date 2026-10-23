@@ -372,6 +372,57 @@ test('帖子内容：引用、图片、链接、emoji 下标、转推、引用�
   assert.strictEqual(extractPost('{bad'), null);
 });
 
+test('长帖：忽略 280 字符预览上限，引用长帖和转推均保留完整正文', () => {
+  const main = '完整的研究解读。'.repeat(65) + '外层结尾';
+  const quoted = '研究方法和实验结果。'.repeat(85) + '引用结尾';
+  const raw = tweet(1, 'alice', { text: main, displayTextRange: [0, 280], quoted_tweet: tweet(2, 'bob', {
+    text: quoted, displayTextRange: [0, 280],
+    extendedEntities: { media: [{ url: 'https://t.co/OLDMEDIA', indices: [281, 304],
+      type: 'photo', media_url_https: 'https://pbs.twimg.com/media/p.jpg' }] },
+  }) });
+  const p = extractPost(raw);
+  assert.strictEqual(p.text, main);
+  assert.strictEqual(p.quoted.text, quoted); // 过期媒体坐标不能删掉 281–304 处的普通文字。
+  assert.strictEqual(p.quoted.media.length, 1);
+  assert.strictEqual(extractPost(tweet(3, 'carol', { retweeted_tweet: raw })).quoted.text, quoted);
+  const store = new Store(path.join(tmpdir(), 'long-post.db'));
+  store.save(raw, 'user:alice', 'now');
+  assert.strictEqual(store.list()[0].post.quoted.text, quoted); // 已入库原始数据无需重新抓取。
+  store.close();
+});
+
+test('长帖：链接坐标失效时按实际短链定位，保留 emoji 后的正文并移除附件短链', () => {
+  const prefix = '👋 具体的研究解读。'.repeat(45);
+  const raw = tweet(1, 'alice', {
+    text: prefix + ' https://t.co/PAPER 结尾 https://t.co/PHOTO https://t.co/QUOTE',
+    displayTextRange: [0, 280],
+    entities: { urls: [
+      { url: 'https://t.co/PAPER', expanded_url: 'https://example.com/paper', display_url: 'example.com/paper', indices: [281, 304] },
+      { url: 'https://t.co/QUOTE', expanded_url: 'https://x.com/bob/status/2', indices: [305, 328] },
+    ] },
+    extendedEntities: { media: [{ url: 'https://t.co/PHOTO', indices: [329, 352], type: 'photo', media_url_https: 'https://pbs.twimg.com/media/p.jpg' }] },
+    quoted_tweet: tweet(2, 'bob'),
+  });
+  const p = extractPost(raw);
+  assert.strictEqual(p.text, prefix + ' example.com/paper 结尾');
+  assert.deepStrictEqual(p.links, [{ url: 'https://example.com/paper', display: 'example.com/paper' }]);
+  assert.strictEqual(p.media.length, 1);
+});
+
+test('正文范围：保留回复起点、处理异常范围，缺失 URL 时不按失效坐标误删正文', () => {
+  const text = '@alice 👋 正文 https://t.co/PIC';
+  const from = Array.from('@alice ').length;
+  const to = Array.from('@alice 👋 正文 ').length;
+  const p = extractPost(tweet(1, 'bob', { text, displayTextRange: [from, to],
+    extendedEntities: { media: [{ indices: [to, Array.from(text).length], type: 'photo', media_url_https: 'https://pbs.twimg.com/media/p.jpg' }] },
+  }));
+  assert.strictEqual(p.text, '👋 正文');
+  assert.strictEqual(extractPost(tweet(1, 'bob', { text: '保留正文', displayTextRange: [999, 280] })).text, '保留正文');
+  assert.strictEqual(extractPost(tweet(1, 'bob', { text: '保留完整正文',
+    extendedEntities: { media: [{ indices: [1, 4] }] },
+  })).text, '保留完整正文');
+});
+
 test('帖子媒体：大图地址、视频 mp4 按码率排序、只接受 X 的服务器', () => {
   const v = extractPost({
     id: '1', url: 'https://x.com/a/status/1', text: '', author: { userName: 'a' },

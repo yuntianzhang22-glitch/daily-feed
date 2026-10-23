@@ -2,6 +2,7 @@
 const { app, BrowserWindow, clipboard, safeStorage } = require('electron');
 const assert = require('node:assert/strict');
 const { localCode } = require('../desktop/core/environment');
+const { extractPost } = require('../desktop/core/post');
 let copiedAccount;
 clipboard.writeText = (text) => { copiedAccount = text; };
 // 测试进程只存本地样例 Key；替换钥匙串 OS 边界，避免无人值守验收被授权弹窗阻塞。
@@ -38,6 +39,25 @@ app.whenReady().then(async () => {
       throw new Error('验收面板没有初始化');
     };
     await ready();
+    // 实际页面必须完整显示长正文和引用长帖，不得只通过解析器单测。
+    const longText = '研究解读 👋 '.repeat(70) + '外层全文结尾';
+    const quoteText = '方法、实验与结果。'.repeat(90) + '引用全文结尾';
+    const longPost = extractPost({ id: 'long-post-regression', text: longText, displayTextRange: [0, 280],
+      author: { userName: 'sample' }, quoted_tweet: { id: 'long-quote', text: quoteText,
+        displayTextRange: [0, 280], author: { userName: 'source' },
+        extendedEntities: { media: [{ url: 'https://t.co/ABSENT', indices: [281, 304] }] },
+      } });
+    const rendered = await run(`(() => {
+      const card = renderTweet(${JSON.stringify({ id: 'long-post-regression', source: 'user:sample', author: 'sample', is_read: true, post: longPost })});
+      document.getElementById('feed').append(card);
+      const nodes = [...card.querySelectorAll('.tweet-text')];
+      const result = nodes.map(n => ({ text: n.textContent, clamp: getComputedStyle(n).webkitLineClamp, clipped: n.scrollHeight > n.clientHeight }));
+      card.remove();
+      return result;
+    })()`);
+    assert.deepEqual(rendered.map(n => n.text), [longText, quoteText]);
+    assert.ok(rendered.every(n => n.clamp === 'none' && !n.clipped));
+    console.log('Long-post rendering passed: 长正文和引用全文完整显示，无行数或高度截断');
     assert.equal(await run('document.getElementById("lab-panel").hidden'), false);
     assert.equal(await run('document.getElementById("lab-copy-account").hidden'), false);
     assert.equal(app.getName(), 'Daily Feed Test');
