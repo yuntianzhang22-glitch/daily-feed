@@ -4,13 +4,13 @@
 
 ## 当前状态
 
-功能随 0.11.0 提供，真实翻译默认关闭；未配置 Azure 时服务返回「翻译服务尚未启用」。没有在安装包、浏览器或仓库内存放供应商密钥。旧安装包需升级至 0.11.0；移动端需部署配套 Worker 与 Pages 入口。
+功能随 0.11.0 提供。正式环境已配置 Azure Translator F0（eastasia）；预发默认关闭并使用独立配置。未配置有效密钥的环境返回「翻译服务尚未启用」。没有在安装包、浏览器或仓库内存放供应商密钥。旧安装包需升级至 0.11.0；移动端需部署配套 Worker 与 Pages 入口。
 
 ## 免费方案及保护
 
 使用 Azure Translator **单服务标准翻译 F0**，不使用大模型，不按 LLM token 计费。F0 当前每个订阅月最多 200 万字符，达到后停止。参考：[定价](https://azure.microsoft.com/en-us/pricing/details/translator/)、[官方 FAQ](https://www.microsoft.com/en-us/translator/business/faq/)、[REST 接口](https://learn.microsoft.com/azure/ai-services/translator/text-translation/reference/v3/translate)。必须在 Azure 门户确认实际 SKU 为 F0；本项目的配置字符串不能验证 Azure 真实套餐。切换 S1 后不再具有相同的免费保护。
 
-- 默认关闭。服务端须同时配置 `TRANSLATION_TIER=F0` 和密钥才会调用供应商。
+- 预发模板默认关闭；正式环境按已验证的 F0 资源启用。服务端须同时配置 `TRANSLATION_TIER=F0` 和密钥才会调用供应商。
 - 本应用每个环境每 UTC 自然月最多预留 180 万字符，可调低、不可调高；这与 Azure 订阅月边界不一定相同，供应商 F0 限制仍是最终保护。
 - 每个账号每日最多 4 万字符；每次最多正文与引用两段，总计 16000 UTF-16 字符（非 BMP 字符保守地算两个）。
 - 单一 Durable Object 持久化预留额度并串行请求，并发不能越过预算。超时、失败的请求也保留预留额度，避免已被供应商处理但丢失响应时低估用量。

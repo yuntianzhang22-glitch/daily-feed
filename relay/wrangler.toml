@@ -33,9 +33,10 @@ new_sqlite_classes = ["MobileScheduleDO"]
 #   npx wrangler secret put TWITTERAPI_KEY   # twitterapi.io 的 API Key
 #   npx wrangler secret put ADMIN_TOKEN      # 管理接口口令，自己生成一个长随机串
 
-# Disabled until an actual Azure Translator F0 resource is configured.
+# Production uses a verified F0 connection; the provider key stays in Worker Secrets.
 [vars]
-TRANSLATION_TIER = "disabled"
+TRANSLATION_TIER = "F0"
+AZURE_TRANSLATOR_REGION = "eastasia"
 TRANSLATION_MONTHLY_LIMIT = "1800000"
 
 [[durable_objects.bindings]]
