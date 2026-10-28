@@ -7,6 +7,8 @@ const required = [
   'relay/wrangler.toml', 'relay/wrangler.staging.toml', 'relay/relay.test.mjs', 'relay/ledger.test.mjs',
   'dev/start.mjs', 'dev/lab-server.mjs', 'dev/fixtures.cjs', 'dev/test-runtime.mjs', '.env.staging.example',
   'desktop/core/permissions.js', 'dev/setup-owner.cjs', '.env.owner.example',
+  'desktop/core/feedback.js', 'desktop/core/feedback-view.js', 'relay/src/feedback.js', 'docs/FEEDBACK.md',
+  'relay/feedback.test.mjs', 'test/feedback.test.cjs', 'test/feedback-runtime.test.mjs', 'test/feedback-integration.test.mjs',
   'desktop/core/installation.js', 'build/package-dmg.sh', 'build/organize-dist.mjs',
   'docs/ENVIRONMENTS.md', 'docs/RELEASE_NOTES.md', 'package-lock.json', 'test/lab.test.mjs', 'test/electron-smoke.cjs',
 ];

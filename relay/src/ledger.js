@@ -220,6 +220,11 @@ export class Ledger {
   }
 
   // 给 app 看的状态
+  feedbackIdentity(id) {
+    const account = this.find(id);
+    return account && !account.disabled ? account.id : null;
+  }
+
   status(id) {
     const a = this.find(id);
     if (!a || a.disabled) return { error: a ? 'invalid_code' : 'not_found' };
@@ -305,5 +310,5 @@ function cleanLimits(l) {
 
 // 允许通过 Durable Object 调用的方法
 export const LEDGER_METHODS = new Set([
-  'price', 'setPrice', 'create', 'createOwner', 'importBeta', 'update', 'status', 'authorize', 'charge', 'topup', 'list', 'history',
+  'feedbackIdentity', 'price', 'setPrice', 'create', 'createOwner', 'importBeta', 'update', 'status', 'authorize', 'charge', 'topup', 'list', 'history',
 ]);

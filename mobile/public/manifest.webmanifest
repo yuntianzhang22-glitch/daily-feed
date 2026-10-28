@@ -1,0 +1,16 @@
+{
+  "id": "/mobile/",
+  "name": "Daily Feed",
+  "short_name": "Daily Feed",
+  "description": "查看关注的 X 账号的帖子",
+  "lang": "zh-CN",
+  "start_url": "/mobile/",
+  "scope": "/mobile/",
+  "display": "standalone",
+  "background_color": "#f7f8fa",
+  "theme_color": "#f7f8fa",
+  "icons": [
+    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

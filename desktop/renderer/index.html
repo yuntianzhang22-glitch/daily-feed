@@ -62,22 +62,37 @@
 
   <dialog id="follows-dialog" class="wide" aria-labelledby="follows-title">
     <div class="dialog-body">
-      <h2 id="follows-title">关注的人</h2>
+      <div class="follow-heading">
+        <h2 id="follows-title">关注的人</h2>
+        <div class="follow-bulk-actions">
+          <button class="btn" type="button" id="undo-follows" disabled>撤销上一步</button>
+          <button class="btn danger" type="button" id="clear-follows">一键清空</button>
+        </div>
+      </div>
       <div class="search-row">
         <input type="search" id="roster-query" placeholder="在名单里搜索名字、用户名或简介"
                aria-label="在内置名单里搜索" autocomplete="off" maxlength="60" />
       </div>
       <div class="chips" id="roster-cats" role="group" aria-label="按分类筛选"></div>
+      <div class="follow-bulk-actions" role="group" aria-label="批量选择当前结果">
+        <label class="checkbox"><input type="checkbox" id="roster-select-all" />全选当前结果</label>
+        <button class="btn" type="button" id="roster-deselect">取消当前选择</button>
+        <button class="btn" type="button" id="roster-invert">反选当前结果</button>
+        <span class="hint" id="roster-selection" role="status"></span>
+      </div>
       <ul class="user-list" id="roster-list" aria-label="内置名单"></ul>
       <p class="hint" id="roster-hint"></p>
+      <p class="hint">批量选择仅影响当前搜索和分类结果。点击整行选择，按住 Shift 连选。</p>
       <h3 class="subheading">已关注 <span id="follow-count"></span></h3>
       <ul class="user-list compact" id="follow-list" aria-label="已关注"></ul>
+      <p class="hint" id="follows-feedback" role="status" aria-live="polite">修改后点击「保存」生效，取消则放弃本次修改。</p>
       <p class="hint" id="follows-cost"></p>
       <p class="error" id="follows-error" role="alert"></p>
-      <div class="dialog-actions">
-        <button class="btn" type="button" id="cancel-follows">取消</button>
-        <button class="btn primary" type="button" id="save-follows">保存</button>
-      </div>
+    </div>
+    <div class="dialog-actions">
+      <span class="hint" id="follows-draft-count" role="status"></span>
+      <button class="btn" type="button" id="cancel-follows">取消</button>
+      <button class="btn primary" type="button" id="save-follows">保存</button>
     </div>
   </dialog>
 
@@ -266,6 +281,8 @@
     <button class="viewer-nav next" type="button" id="viewer-next" aria-label="下一个">›</button>
   </dialog>
 
+  <script src="../core/translation-view.js"></script>
+  <script src="../core/feedback-view.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -8,6 +8,8 @@
 //   node relay/admin.mjs backup-accounts                  升级前备份账号列表
 //   node relay/admin.mjs add-paid "名字"                  新建付费码（余额 0，充值后可用）
 //   node relay/admin.mjs topup <账号> <金额> [备注]       充值（元）；负数为退款或冲正
+//   node relay/admin.mjs feedback-stats                   查看用户反馈汇总
+//   node relay/admin.mjs feedback-export [events|current] [文件] 导出研究数据 JSONL
 //   node relay/admin.mjs list                             所有账号、余额、本月用量
 //   node relay/admin.mjs show <账号>                      一个账号的充值记录和每月用量
 //   node relay/admin.mjs price [汇率 加价倍数]             查看或修改价格
@@ -98,7 +100,29 @@ function line(a) {
 }
 
 try {
-  if (cmd === 'backup-accounts') {
+  if (cmd === 'feedback-stats') {
+    console.log(JSON.stringify(await call('/admin/feedback/stats'), null, 2));
+  } else if (cmd === 'feedback-export') {
+    const kind = args[0] || 'events';
+    if (!['events', 'current'].includes(kind)) throw new Error('导出类型只能是 events 或 current');
+    const dir = new URL('../.local/', import.meta.url);
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const file = args[1] || new URL(`${environment}-feedback-${kind}-${Date.now()}.jsonl`, dir).pathname;
+    const fd = fs.openSync(file, 'wx', 0o600);
+    let after = 0, until, count = 0;
+    try {
+      do {
+        const page = await call(`/admin/feedback/export?kind=${kind}&after=${after}&limit=200${until == null ? '' : `&until=${until}`}`);
+        until = page.until;
+        for (const record of page.records) { fs.writeSync(fd, JSON.stringify({ schema_version: page.schema_version, kind, environment, ...record }) + '\n'); count++; }
+        after = page.next_cursor;
+      } while (after != null);
+    } catch (e) {
+      fs.closeSync(fd); fs.rmSync(file, { force: true }); throw e;
+    }
+    fs.closeSync(fd);
+    console.log(`反馈数据已导出：${file}；${count} 条。用户标识不含登录账号，帖子为用户反馈时提交的快照。`);
+  } else if (cmd === 'backup-accounts') {
     const data = await call('/admin/codes');
     const dir = new URL('../.local/', import.meta.url);
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });

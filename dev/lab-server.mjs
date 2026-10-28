@@ -4,11 +4,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import worker, { LedgerDO } from '../relay/src/worker.js';
+import worker, { LedgerDO, MobileScheduleDO, TranslationDO, FeedbackDO } from '../relay/src/worker.js';
 import profiles from '../desktop/core/environment.js';
 import fixtures from './fixtures.cjs';
 
-export async function startLab({ root, environment, port = 0, liveApiKey = '' }) {
+export async function startLab({ root, environment, port = 0, liveApiKey = '', assets }) {
   if (!['test', 'staging'].includes(environment)) throw new Error('本地服务不能以正式环境运行');
   if (environment === 'test' && liveApiKey) throw new Error('测试环境只使用样例数据');
   const dir = path.join(root, environment, 'server');
@@ -31,6 +31,7 @@ export async function startLab({ root, environment, port = 0, liveApiKey = '' })
   kv['public:roster.json'] = fs.readFileSync(new URL('../desktop/roster.json', import.meta.url), 'utf8');
   const currentVersion = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
   const env = {
+    ASSETS: assets,
     ADMIN_TOKEN: token, TWITTERAPI_KEY: liveApiKey || fixtureKey,
     ACCESS: {
       get: async (k) => kv[k] ?? null,
@@ -39,6 +40,47 @@ export async function startLab({ root, environment, port = 0, liveApiKey = '' })
     },
     LEDGER: { idFromName: (n) => n, get: () => ({ call: async (method, args) => structuredClone(obj.call(method, args)) }) },
   };
+  const feedback = new FeedbackDO({ storage: { sql, transactionSync(fn) {
+    db.exec('BEGIN'); try { const result = fn(); db.exec('COMMIT'); return result; }
+    catch (e) { db.exec('ROLLBACK'); throw e; }
+  } } }, env);
+  env.FEEDBACK = { idFromName: (n) => n, get: () => feedback };
+  // Deterministic fixture provider: exercises auth/cache/budget without Azure calls.
+  // Live staging remains disabled until its own F0 resource is configured.
+  if (!liveApiKey) {
+    db.exec('CREATE TABLE IF NOT EXISTS translation_state (key TEXT PRIMARY KEY, value TEXT)');
+    const storage = {
+      async get(key) { const row = db.prepare('SELECT value FROM translation_state WHERE key=?').get(key); return row ? JSON.parse(row.value) : undefined; },
+      async put(key, value) { db.prepare('INSERT OR REPLACE INTO translation_state VALUES (?, ?)').run(key, JSON.stringify(value)); },
+      async getAlarm() { return this.get('alarm'); },
+      async setAlarm(at) { return this.put('alarm', at); },
+    };
+    const translation = new TranslationDO({ storage }, { TRANSLATION_TIER: 'F0', AZURE_TRANSLATOR_KEY: 'fixture-only' });
+    translation.service.fetch = async (_url, init) => Response.json(JSON.parse(init.body).map(({ Text }) => ({ translations: [{ text: `样例译文（仅供界面验收）：\n${Text}` }] })));
+    env.TRANSLATION = { idFromName: (n) => n, get: () => translation };
+  }
+  db.exec('CREATE TABLE IF NOT EXISTS mobile_state (account TEXT, key TEXT, value TEXT, PRIMARY KEY(account, key))');
+  const schedules = new Map();
+  env.MOBILE_SCHEDULE = { idFromName: (name) => name, get(account) {
+    if (!schedules.has(account)) {
+      const storage = {
+        async get(key) { const row = db.prepare('SELECT value FROM mobile_state WHERE account=? AND key=?').get(account, key); return row ? JSON.parse(row.value) : undefined; },
+        async put(key, value) {
+          const entries = typeof key === 'object' ? Object.entries(key) : [[key, value]];
+          for (const [k, v] of entries) db.prepare('INSERT OR REPLACE INTO mobile_state VALUES (?, ?, ?)').run(account, k, JSON.stringify(v));
+        },
+        async delete(keys) { for (const key of Array.isArray(keys) ? keys : [keys]) db.prepare('DELETE FROM mobile_state WHERE account=? AND key=?').run(account, key); },
+        async list({ prefix = '', reverse = false, limit = 1000 } = {}) {
+          const rows = db.prepare(`SELECT key,value FROM mobile_state WHERE account=? AND key LIKE ? ORDER BY key ${reverse ? 'DESC' : 'ASC'} LIMIT ?`).all(account, prefix + '%', limit);
+          return new Map(rows.map((row) => [row.key, JSON.parse(row.value)]));
+        },
+        async setAlarm(at) { await this.put('alarm', at); },
+        async deleteAlarm() { await this.delete('alarm'); },
+      };
+      schedules.set(account, new MobileScheduleDO({ storage }, env));
+    }
+    return schedules.get(account);
+  } };
   const accounts = {};
   for (const role of ['owner', 'beta', 'paid']) for (const scenario of Object.keys(profiles.SCENARIOS[role])) {
     const code = profiles.localCode(environment, role, scenario);
@@ -110,7 +152,7 @@ export async function startLab({ root, environment, port = 0, liveApiKey = '' })
   return {
     url, token, accounts, directKey: liveApiKey || fixtureKey,
     directBase: liveApiKey ? 'https://api.twitterapi.io' : url,
-    ledger,
+    ledger, schedules,
     close: async () => { await new Promise((resolve) => server.close(resolve)); db.close(); },
   };
 }

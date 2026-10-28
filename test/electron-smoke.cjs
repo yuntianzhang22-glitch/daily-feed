@@ -57,6 +57,24 @@ app.whenReady().then(async () => {
     })()`);
     assert.deepEqual(rendered.map(n => n.text), [longText, quoteText]);
     assert.ok(rendered.every(n => n.clamp === 'none' && !n.clipped));
+    await run(`(async () => {
+      let calls = 0;
+      const control = translationControl({ document, texts: ['hello', 'quote'], translate: async () => {
+        calls++; return { texts: ['你好 <script>bad()</script>', '引用译文'] };
+      } });
+      document.getElementById('feed').append(control);
+      const button = control.querySelector('button'); button.click();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      if (!control.textContent.includes('引用译文') || control.querySelector('script') || button.getAttribute('aria-expanded') !== 'true') throw new Error('译文展示错误');
+      button.click(); if (!control.querySelector('.translation-output').hidden) throw new Error('收起译文失败');
+      button.click(); if (calls !== 1) throw new Error('切换重复请求');
+      control.remove();
+      const failed = translationControl({ document, texts: ['hello'], translate: async () => { throw new Error('翻译服务尚未启用'); } });
+      document.body.append(failed); failed.querySelector('button').click();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      if (!failed.textContent.includes('翻译服务尚未启用') || failed.querySelector('button').disabled) throw new Error('翻译失败反馈错误');
+      failed.remove();
+    })()`);
     console.log('Long-post rendering passed: 长正文和引用全文完整显示，无行数或高度截断');
     assert.equal(await run('document.getElementById("lab-panel").hidden'), false);
     assert.equal(await run('document.getElementById("lab-copy-account").hidden'), false);
@@ -66,6 +84,25 @@ app.whenReady().then(async () => {
     assert.equal((await run('api.labInfo()')).role, 'owner');
     assert.equal((await run('api.accessInfo()')).mode, 'relay');
     assert.ok((await run('api.counts()')).total > 0);
+    const feedbackTweet = (await run('api.list({limit:1})'))[0];
+    await run('loadFeed(true)');
+    const waitFeedback = async (expression) => {
+      for (let i = 0; i < 200; i++) { if (await run(expression)) return; await new Promise(resolve => setTimeout(resolve, 20)); }
+      throw new Error('反馈界面未完成：' + expression);
+    };
+    await waitFeedback(`document.querySelector('#feed .feedback-button')?.disabled === false`);
+    await run(`document.querySelector('#feed .feedback-button').click()`);
+    await waitFeedback(`document.querySelector('#feed .feedback-status').textContent.includes('已同步') && document.querySelector('#feed .feedback-button').getAttribute('aria-pressed') === 'true'`);
+    assert.equal((await run(`api.feedbackState(${JSON.stringify(feedbackTweet.post.id)})`)).value, 1);
+    await run(`document.querySelector('#feed .feedback-buttons button:nth-child(2)').click()`);
+    await waitFeedback(`document.querySelector('#feed .feedback-buttons button:nth-child(2)').getAttribute('aria-pressed') === 'true' && !document.querySelector('#feed .feedback-buttons button:nth-child(2)').disabled`);
+    await run(`document.querySelector('#feed .feedback-buttons button:nth-child(2)').click()`);
+    await waitFeedback(`document.querySelector('#feed .feedback-buttons button:nth-child(2)').getAttribute('aria-pressed') === 'false' && !document.querySelector('#feed .feedback-button').disabled`);
+    const response = await fetch(process.env.DAILY_FEED_LAB_URL + '/admin/feedback/stats', { headers: { Authorization: 'Bearer ' + process.env.DAILY_FEED_LAB_TOKEN } });
+    const stats = await response.json();
+    assert.equal(stats.totals.changes, 3); assert.equal(stats.totals.up, 0); assert.equal(stats.totals.down, 0);
+    console.log('桌面反馈验收通过：真实按钮/IPC/服务端存储/改踩/取消/统计，未调用 X。');
+    await require('./follows-ui.cjs')(run, win);
     await run('openSettings().then(() => renderAccess())');
     assert.equal(await run('document.getElementById("access-title").textContent'), '账号登录');
     assert.equal(await run('getComputedStyle(document.getElementById("access-code-row")).display'), 'none');

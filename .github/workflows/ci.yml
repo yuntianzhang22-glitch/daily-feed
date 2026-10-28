@@ -13,6 +13,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - run: npm run test:mobile
       - run: npm run test:ui
       - name: Build production app
         run: npm run dist

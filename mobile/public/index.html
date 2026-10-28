@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f7f8fa">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Daily Feed">
+  <meta name="description" content="查看关注的 X 账号的帖子。">
+  <title>Daily Feed</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="apple-touch-icon" href="./icons/icon-192.png">
+  <link rel="icon" href="./icons/icon-192.png">
+  <link rel="stylesheet" href="./style.css">
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <div id="boot" class="empty" role="status">正在打开 Daily Feed…</div>
+  <section id="login" class="login" hidden aria-labelledby="login-title">
+    <img class="app-icon" src="./icons/icon-192.png" alt="" width="72" height="72">
+    <h1 id="login-title">登录 Daily Feed</h1>
+    <form id="login-form">
+      <label for="account">账号编号</label>
+      <input id="account" name="account" placeholder="DF-XXXXX" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="128" required aria-describedby="login-help">
+      <p id="login-help" class="hint">输入内测邀请中的账号编号即可登录，无需密码。还没有账号？请联系邀请你的人。</p>
+      <button class="primary full" id="login-submit" type="submit">登录</button>
+      <p id="login-error" class="error" role="alert"></p>
+    </form>
+    <p class="hint install-guide">在 Safari 中点「分享」→「添加到主屏幕」，下次像应用一样打开。</p>
+  </section>
+
+  <div id="app" hidden>
+    <header class="topbar"><a class="wordmark" href="./">Daily Feed<span class="beta">内测</span></a><button id="fetch" class="primary">立即抓取</button></header>
+    <p id="network" class="notice" hidden></p>
+    <p id="message" class="message" role="status" aria-live="polite"></p>
+    <button id="update" class="notice full" hidden>移动版已更新，点此重新打开</button>
+    <main id="content">
+      <section id="reading" aria-labelledby="reading-title">
+        <div class="section-title"><div><p class="eyebrow" id="today"></p><h1 id="reading-title">全部</h1></div><span class="hint" id="total"></span></div>
+        <div class="filters" role="group" aria-label="阅读筛选"><button data-view="all" aria-pressed="true">全部</button><button data-view="unread" aria-pressed="false">未读</button><button data-view="starred" aria-pressed="false">收藏</button></div>
+        <input id="search" type="search" placeholder="搜索内容或作者" aria-label="搜索内容或作者">
+        <div class="feed-tools"><select id="source" aria-label="按来源筛选"><option value="">所有来源</option></select><select id="sort" aria-label="排序"><option value="time">最新发布</option><option value="likes">最多点赞</option></select><button id="mark-read" class="text-button">全部已读</button></div>
+        <div id="feed" aria-label="帖子列表"></div>
+        <button id="load-more" class="secondary full" hidden>加载更多</button>
+      </section>
+      <section id="following" hidden aria-labelledby="following-title">
+        <div class="section-title"><h1 id="following-title">关注的人</h1><span id="follow-count" class="hint"></span></div>
+        <p class="hint">选择你想读的人，保存后点「立即抓取」。</p>
+        <form id="add-form" class="add-row"><input id="username" aria-label="添加 X 用户名" placeholder="输入 X 用户名，如 karpathy" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="16"><button class="secondary" type="submit">添加</button></form>
+        <div class="panel">
+          <div class="follow-heading"><h2>已关注</h2><button id="clear-follows" class="danger">一键清空</button></div>
+          <div class="follow-bulk-actions"><button id="undo-follows" class="secondary" disabled>撤销上一步</button><button id="reset-follows" class="secondary" disabled>放弃修改</button></div>
+          <p class="hint" id="follows-feedback" role="status">修改后点击「保存关注」生效，可撤销或放弃修改。</p>
+          <div id="followed"></div>
+        </div>
+        <input id="roster-search" type="search" placeholder="搜索推荐名单" aria-label="搜索推荐名单">
+        <div id="categories" class="categories" role="group" aria-label="名单分类"></div>
+        <div class="follow-bulk-actions" role="group" aria-label="批量选择当前结果">
+          <button id="roster-select-all" class="secondary">全选当前结果</button>
+          <button id="roster-deselect" class="secondary">取消当前选择</button>
+          <button id="roster-invert" class="secondary">反选当前结果</button>
+        </div>
+        <p class="hint" id="roster-selection" role="status"></p>
+        <p class="hint">批量选择仅影响当前搜索和分类结果。</p>
+        <div id="roster" class="panel"></div>
+      </section>
+      <section id="settings" hidden aria-labelledby="settings-title">
+        <div class="section-title"><h1 id="settings-title">设置</h1></div>
+        <div class="panel"><h2>我的账号</h2><p id="account-name"></p><p class="account-number" id="account-number"></p><p id="account-usage" class="hint"></p><div class="button-row"><button id="copy-account" class="secondary">复制账号编号</button><button id="refresh-account" class="secondary">刷新状态</button></div><p class="hint">编号是你的登录凭证，请私下保管。手机和 Mac 共用额度；关注、收藏与已读保存在当前设备。</p></div>
+        <form id="schedule-form" class="panel" aria-describedby="schedule-status">
+          <h2>定时抓取</h2>
+          <label class="setting-row" for="schedule-enabled"><span>开启定时抓取</span><input id="schedule-enabled" type="checkbox" role="switch" disabled></label>
+          <fieldset id="schedule-fields" disabled>
+            <label class="setting-row" for="schedule-frequency"><span>频率</span><select id="schedule-frequency"><option value="daily">每天</option><option value="weekdays">工作日</option><option value="custom">每周指定日期</option></select></label>
+            <fieldset id="schedule-days" class="day-picker"><legend>抓取日</legend>
+              <label><input type="checkbox" name="schedule-day" value="1"><span>周一</span></label>
+              <label><input type="checkbox" name="schedule-day" value="2"><span>周二</span></label>
+              <label><input type="checkbox" name="schedule-day" value="3"><span>周三</span></label>
+              <label><input type="checkbox" name="schedule-day" value="4"><span>周四</span></label>
+              <label><input type="checkbox" name="schedule-day" value="5"><span>周五</span></label>
+              <label><input type="checkbox" name="schedule-day" value="6"><span>周六</span></label>
+              <label><input type="checkbox" name="schedule-day" value="0"><span>周日</span></label>
+            </fieldset>
+            <label class="setting-row" for="schedule-time"><span>时间</span><input id="schedule-time" type="time" value="09:00" required></label>
+            <p class="hint">北京时间（UTC+8）。按已保存的关注和抓取偏好执行。</p>
+          </fieldset>
+          <p id="schedule-status" class="hint" role="status">正在读取设置…</p>
+          <p id="schedule-last-run" class="hint"></p>
+          <button id="save-schedule" type="submit" class="primary full" disabled>保存定时设置</button>
+          <p class="hint">由云端执行，关闭手机页面后仍会运行，使用同一账号的额度或余额。关闭开关并保存即可停止。</p>
+        </form>
+        <form id="preferences" class="panel"><h2>抓取偏好</h2><label class="setting-row" for="search-mode"><span>内容排序</span><select id="search-mode"><option value="Top">热门内容</option><option value="Latest">最新内容</option></select></label><label class="setting-row" for="include-replies"><span>包含回复</span><input id="include-replies" type="checkbox" role="switch"></label><p class="hint">每人每次最多保留 3 条。</p><button type="submit" class="secondary">保存偏好</button></form>
+        <div class="panel"><h2>添加到主屏幕</h2><p class="hint">用 iPhone 的 Safari 打开此网址，点「分享」→「添加到主屏幕」。若出现「作为网页 App 打开」，保持开启。</p><p class="hint">已抓取的正文可离线阅读。图片和视频需要网络。请勿清除网站数据，以免丢失本机收藏和阅读记录。</p><button id="check-update" class="secondary">检查移动版更新</button></div>
+        <button id="logout" class="secondary full danger">退出登录</button>
+        <p class="hint version">Daily Feed · iPhone 内测版 <span id="version"></span></p>
+      </section>
+    </main>
+    <div id="follow-actions" class="bottom-actions" hidden><span id="draft-count" class="hint"></span><button id="save-follows" class="primary">保存关注</button></div>
+    <nav class="tabbar" aria-label="主导航">
+      <button data-tab="reading" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zM8 8h8M8 12h8M8 16h5"/></svg>阅读</button>
+      <button data-tab="following"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M19 7v6M16 10h6"/></svg>关注</button>
+      <button data-tab="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></svg>设置</button>
+    </nav>
+  </div>
+  <noscript><p class="empty">请在 Safari 设置中启用 JavaScript 后打开 Daily Feed。</p></noscript>
+</body>
+</html>

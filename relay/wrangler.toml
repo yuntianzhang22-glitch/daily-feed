@@ -2,6 +2,11 @@ name = "daily-feed-relay"
 main = "src/worker.js"
 compatibility_date = "2026-10-01"
 
+[assets]
+directory = "../mobile/dist"
+binding = "ASSETS"
+run_worker_first = true
+
 # 创建：npx wrangler kv namespace create ACCESS，把输出的 id 填到这里
 [[kv_namespaces]]
 binding = "ACCESS"
@@ -16,6 +21,36 @@ class_name = "LedgerDO"
 tag = "v1"
 new_sqlite_classes = ["LedgerDO"]
 
+[[durable_objects.bindings]]
+name = "MOBILE_SCHEDULE"
+class_name = "MobileScheduleDO"
+
+[[migrations]]
+tag = "v2-mobile-schedule"
+new_sqlite_classes = ["MobileScheduleDO"]
+
 # 以下两个是 Secret，不要写在这个文件里：
 #   npx wrangler secret put TWITTERAPI_KEY   # twitterapi.io 的 API Key
 #   npx wrangler secret put ADMIN_TOKEN      # 管理接口口令，自己生成一个长随机串
+
+# Disabled until an actual Azure Translator F0 resource is configured.
+[vars]
+TRANSLATION_TIER = "disabled"
+TRANSLATION_MONTHLY_LIMIT = "1800000"
+
+[[durable_objects.bindings]]
+name = "TRANSLATION"
+class_name = "TranslationDO"
+
+[[migrations]]
+tag = "v3-translation"
+new_sqlite_classes = ["TranslationDO"]
+
+# Feedback data never shares tables with account balances or translation.
+[[durable_objects.bindings]]
+name = "FEEDBACK"
+class_name = "FeedbackDO"
+
+[[migrations]]
+tag = "v4-feedback"
+new_sqlite_classes = ["FeedbackDO"]

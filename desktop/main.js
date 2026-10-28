@@ -1,3 +1,4 @@
+const { FeedbackQueue, snapshotFromRaw, POST_ID } = require('./core/feedback');
 // Electron 主进程：窗口、抓取（进程内 Node 后端）、定时、通知、访问码、内置名单、应用内更新。
 const {
   app, BrowserWindow, clipboard, dialog, ipcMain, net, Notification, powerMonitor, safeStorage, shell,
@@ -395,6 +396,30 @@ async function installUpdate() {
   return { ok: true };
 }
 
+// Feedback outboxes are partitioned by signed-in account, independently of local posts.
+const feedbackQueues = new Map();
+async function feedbackQueue() {
+  const session = activeAccount(), revision = authRevision, file = P.db(), dbStore = store;
+  if (!session) throw new Error('请先登录账号后反馈');
+  const code = session.code, scope = session.account_no || code;
+  const key = `${file}:${scope}:${revision}`;
+  const guard = () => {
+    if (P.db() !== file || activeAccount()?.code !== code || authRevision !== revision) throw new Error('登录状态已变更，请重试');
+  };
+  if (!feedbackQueues.has(key)) {
+    const client = new FeedClient({ mode: 'relay', relayUrl: APP_CONFIG.relayUrl, accessCode: code, fetchImpl: netFetch });
+    const queue = new FeedbackQueue({ storage: {
+      get: async () => { guard(); return JSON.parse(dbStore.getState(`feedback:${scope}`) || 'null'); },
+      put: async (data) => { guard(); dbStore.setState(`feedback:${scope}`, JSON.stringify(data)); },
+    }, client: {
+      submitFeedback: async (event) => { guard(); const result = await client.submitFeedback(event); guard(); return result; },
+      readFeedback: async (ids) => { guard(); const result = await client.readFeedback(ids); guard(); return result; },
+    }, uuid: () => require('node:crypto').randomUUID() });
+    feedbackQueues.set(key, queue.load().then(() => ({ queue, guard })));
+  }
+  const result = await feedbackQueues.get(key); guard(); return result;
+}
+
 // ------------------------------------------------------------ IPC
 
 const handlers = {
@@ -484,6 +509,43 @@ ipcMain.handle('save-config', (_e, cfg) => {
   if (!activeDays(before).length && activeDays(saved).length) writeLastAuto(Date.now());
   schedule();
   return visibleSettings(saved, currentRole());
+});
+ipcMain.handle('feedback-state', async (_e, id) => {
+  if (!POST_ID.test(String(id))) throw new Error('帖子编号无效');
+  const { queue, guard } = await feedbackQueue(); guard(); return queue.state(String(id));
+});
+ipcMain.handle('feedback-sync', async (_e, ids = []) => {
+  if (!Array.isArray(ids) || ids.length > 200 || ids.some((id) => !POST_ID.test(id))) throw new Error('帖子编号无效');
+  const { queue, guard } = await feedbackQueue();
+  try { const result = await queue.refresh(ids); guard(); return result; }
+  catch (e) { guard(); throw e; }
+});
+ipcMain.handle('feedback-set', async (_e, id, value, context) => {
+  const { queue, guard } = await feedbackQueue(); guard();
+  const row = store.db.prepare('SELECT raw,source FROM tweets WHERE id=?').get(String(id));
+  if (!row) throw new Error('帖子不存在');
+  const snapshot = snapshotFromRaw(row.raw, row.source);
+  const result = await queue.set(snapshot, value, { view: String(context?.view || '').slice(0, 40), sort: String(context?.sort || '').slice(0, 40),
+    position: context?.position, platform: 'desktop', app_version: app.getVersion(), algorithm_version: 'baseline-v1' });
+  guard(); return result;
+});
+ipcMain.handle('feedback-retry', async () => {
+  const { queue, guard } = await feedbackQueue(); const result = await queue.flush(); guard(); return result;
+});
+ipcMain.handle('translate-post', async (_e, id) => {
+  const session = activeAccount();
+  if (!session) throw new Error('请先登录账号后使用翻译');
+  if (typeof id !== 'string' || id.length > 128) throw new Error('帖子编号无效');
+  const row = store.db.prepare('SELECT raw FROM tweets WHERE id = ?').get(id);
+  if (!row) throw new Error('帖子不存在');
+  const { extractPost } = require('./core/post');
+  const post = extractPost(row.raw);
+  const texts = [post?.text || ''];
+  if (post?.quoted?.text) texts.push(post.quoted.text);
+  const client = new FeedClient({ mode: 'relay', relayUrl: APP_CONFIG.relayUrl, accessCode: session.code, fetchImpl: netFetch });
+  const result = await client.translate(texts);
+  if (activeAccount()?.code !== session.code) throw new Error('登录状态已变更，请重试');
+  return result;
 });
 ipcMain.handle('fetch-now', () => doFetch());
 ipcMain.handle('access-info', async () => {

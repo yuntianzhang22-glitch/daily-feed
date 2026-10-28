@@ -1,3 +1,4 @@
+import { FeedbackStore, FeedbackError, normalizeFeedback, validateIds } from './feedback.js';
 // Daily Feed 中转服务（Cloudflare Worker）
 //
 // - twitterapi.io 的 API Key 只存在这里（Worker Secret: TWITTERAPI_KEY），不进安装包
@@ -8,8 +9,10 @@
 //
 // 管理接口用 ADMIN_TOKEN（Worker Secret）保护，见 relay/admin.mjs。
 
+import { TranslationService, TranslationError, validateTexts } from './translation.js';
 import { DurableObject } from 'cloudflare:workers';
 import { Ledger, LEDGER_METHODS, CREDITS_PER_TWEET, MIN_CREDITS, monthKey } from './ledger.js';
+import { ScheduledFeed, validateSchedule } from './mobile-schedule.js';
 
 const TWITTERAPI_DEFAULT = 'https://api.twitterapi.io';
 const MAX_QUERY_LENGTH = 512;
@@ -38,6 +41,55 @@ export class LedgerDO extends DurableObject {
   }
 }
 
+export class FeedbackDO extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.feedback = new FeedbackStore(ctx.storage.sql, (fn) => ctx.storage.transactionSync(fn));
+  }
+  async submit(user, body) {
+    try {
+      const event = normalizeFeedback(body);
+      const s = event.snapshot;
+      // Identity of the displayed content excludes changing popularity/source metadata.
+      const hash = await sha256(JSON.stringify({ id: s.id, text: s.text, truncated: s.truncated,
+        quoted: s.quoted ? { id: s.quoted.id, text: s.quoted.text, truncated: s.quoted.truncated } : null, links: s.links }));
+      return { ok: true, ...this.feedback.submit(user, event, hash) };
+    } catch (e) {
+      if (e instanceof FeedbackError) return { ok: false, code: e.code, message: e.message, status: e.status, current: e.current };
+      return { ok: false, code: 'feedback_failed', message: '反馈暂未同步，请稍后重试', status: 503 };
+    }
+  }
+  read(user, ids) { return this.feedback.read(user, ids); }
+  stats() { return this.feedback.stats(); }
+  export(options) { return this.feedback.export(options); }
+}
+
+export class TranslationDO extends DurableObject {
+  constructor(ctx, env) { super(ctx, env); this.service = new TranslationService(ctx.storage, env); }
+  alarm() { return this.service.cleanup(); }
+  async translate(account, body) {
+    try { return { ok: true, ...await this.service.translate(account, body) }; }
+    catch (e) {
+      if (e instanceof TranslationError) return { ok: false, code: e.code, message: e.message, status: e.status };
+      return { ok: false, code: 'translation_failed', message: '翻译暂时失败，请稍后重试', status: 502 };
+    }
+  }
+}
+
+export class MobileScheduleDO extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.feed = new ScheduledFeed(ctx.storage, {
+      accountStatus: (id) => accountStatus(ledger(env), env, id),
+      search: (request) => search(request, env),
+    });
+  }
+  read() { return this.feed.read(); }
+  save(account, body) { return this.feed.save(account, body); }
+  posts() { return this.feed.feed(); }
+  alarm() { return this.feed.alarm(); }
+}
+
 // 整个服务只用一个账本实例
 function ledger(env) {
   const stub = env.LEDGER.get(env.LEDGER.idFromName('main'));
@@ -49,17 +101,117 @@ export default {
     const url = new URL(request.url);
     try {
       if (request.method === 'OPTIONS') return new Response(null, { status: 204 });
+      if (['/v1/feedback', '/v1/feedback/read'].includes(url.pathname) && request.method === 'POST') return await feedback(request, env, url);
+      if (url.pathname === '/v1/translate' && request.method === 'POST') return await translate(request, env);
       if (url.pathname === '/v1/search' && request.method === 'POST') return await search(request, env);
       if (url.pathname === '/v1/status' && request.method === 'GET') return await status(request, env);
+      if (['/v1/mobile/schedule', '/v1/mobile/feed'].includes(url.pathname)) return await mobile(request, env, url);
       if (url.pathname === '/v1/latest' && request.method === 'GET') return await publicKv(env, 'latest.json');
       if (url.pathname === '/v1/roster' && request.method === 'GET') return await publicKv(env, 'roster.json');
       if (url.pathname.startsWith('/admin/')) return await admin(request, env, url);
+      if (env.ASSETS && ['GET', 'HEAD'].includes(request.method)) {
+        if (url.pathname === '/' || url.pathname === '/mobile') return Response.redirect(`${url.origin}/mobile/`, 302);
+        if (url.pathname.startsWith('/mobile/')) {
+          const asset = await env.ASSETS.fetch(request);
+          const response = new Response(asset.body, asset);
+          response.headers.set('Cache-Control', 'no-cache');
+          response.headers.set('X-Content-Type-Options', 'nosniff');
+          response.headers.set('Referrer-Policy', 'no-referrer');
+          response.headers.set('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' https://pbs.twimg.com https://abs.twimg.com; media-src https://video.twimg.com https://video-s.twimg.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'");
+          return response;
+        }
+      }
       return json({ code: 'not_found', message: 'not found' }, 404);
     } catch (e) {
       return json({ code: 'internal', message: String(e && e.message || e) }, 500);
     }
   },
 };
+
+async function readBoundedJson(request, maxBytes) {
+  const reader = request.body?.getReader();
+  if (!reader) throw new FeedbackError('feedback_input', '缺少反馈内容');
+  let length = 0; const chunks = [];
+  for (;;) {
+    const { value, done } = await reader.read(); if (done) break;
+    length += value.length;
+    if (length > maxBytes) { await reader.cancel(); throw new FeedbackError('feedback_input', '反馈内容过长', 413); }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(length); let at = 0;
+  for (const chunk of chunks) { bytes.set(chunk, at); at += chunk.length; }
+  try { return JSON.parse(new TextDecoder().decode(bytes)); }
+  catch { throw new FeedbackError('feedback_input', '反馈格式无效'); }
+}
+function feedbackStub(env) { return env.FEEDBACK?.get(env.FEEDBACK.idFromName('main')); }
+async function feedback(request, env, url) {
+  const id = await codeId(request);
+  if (!id) return json({ code: 'invalid_code', message: '请先登录后反馈' }, 401);
+  const book = ledger(env), account = await accountStatus(book, env, id);
+  if (account.error) return denied(account);
+  const user = await book.call('feedbackIdentity', id);
+  if (!user) return json({ code: 'invalid_code', message: '登录账号已停用' }, 401);
+  const stub = feedbackStub(env);
+  if (!stub) return json({ code: 'feedback_unavailable', message: '反馈服务暂未启用，标记会保留待同步' }, 503);
+  try {
+    const body = await readBoundedJson(request, url.pathname.endsWith('/read') ? 8192 : 524288);
+    if (url.pathname.endsWith('/read')) return json(await stub.read(user, validateIds(body.ids)));
+    normalizeFeedback(body);
+    const result = await stub.submit(user, body);
+    if (!result.ok) return json({ code: result.code, message: result.message, current: result.current }, result.status);
+    return json({ state: result.state, duplicate: Boolean(result.duplicate) });
+  } catch (e) {
+    if (e instanceof FeedbackError) return json({ code: e.code, message: e.message }, e.status);
+    return json({ code: 'feedback_failed', message: '反馈暂未同步，请稍后重试' }, 503);
+  }
+}
+
+async function translate(request, env) {
+  const id = await codeId(request);
+  if (!id) return json({ code: 'invalid_code', message: '请先登录' }, 401);
+  const account = await accountStatus(ledger(env), env, id);
+  if (account.error) return denied(account);
+  // Bound streamed input even when Content-Length is absent or forged.
+  const reader = request.body?.getReader();
+  if (!reader) return json({ code: 'translation_input', message: '缺少正文' }, 400);
+  let length = 0; const chunks = [];
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    length += value.length;
+    if (length > 65536) { await reader.cancel(); return json({ code: 'translation_input', message: '正文过长' }, 413); }
+    chunks.push(value);
+  }
+  let body;
+  try {
+    const bytes = new Uint8Array(length); let at = 0;
+    for (const chunk of chunks) { bytes.set(chunk, at); at += chunk.length; }
+    body = JSON.parse(new TextDecoder().decode(bytes)); validateTexts(body);
+  } catch { return json({ code: 'translation_input', message: '正文格式无效或超过 16000 字符', }, 400); }
+  if (!env.TRANSLATION) return json({ code: 'translation_unavailable', message: '翻译服务尚未启用，请稍后再试' }, 503);
+  const result = await env.TRANSLATION.get(env.TRANSLATION.idFromName('main')).translate(account.account_no, { texts: body.texts });
+  if (!result.ok) return json({ code: result.code, message: result.message }, result.status);
+  return json({ texts: result.texts, cached: result.cached });
+}
+
+async function mobile(request, env, url) {
+  const validMethod = url.pathname.endsWith('/schedule') ? ['GET', 'POST'].includes(request.method) : request.method === 'GET';
+  if (!validMethod) return json({ code: 'not_found', message: 'not found' }, 404);
+  const id = await codeId(request);
+  if (!id) return json({ code: 'invalid_code', message: '登录账号无效或已停用' }, 401);
+  const account = await accountStatus(ledger(env), env, id);
+  if (account.error) return denied(account);
+  if (!env.MOBILE_SCHEDULE) return json({ code: 'unavailable', message: '定时服务暂不可用' }, 503);
+  const stub = env.MOBILE_SCHEDULE.get(env.MOBILE_SCHEDULE.idFromName(account.account_no));
+  if (url.pathname.endsWith('/feed')) return json(await stub.posts());
+  if (request.method === 'GET') return json(await stub.read());
+  let body;
+  try { body = await request.json(); } catch { return json({ code: 'bad_request', message: '设置格式无效' }, 400); }
+  const before = await stub.read();
+  try { validateSchedule(body, account, before.config); }
+  catch (e) { return json({ code: 'bad_schedule', message: e.message }, 400); }
+  return json(await stub.save(account, body));
+}
 
 // ------------------------------------------------------------ 访问码
 
@@ -180,6 +332,17 @@ async function admin(request, env, url) {
   const run = async (fn) => {
     try { return json(await fn()); } catch (e) { return json({ code: 'bad_request', message: e.message }, 400); }
   };
+
+  if (url.pathname.startsWith('/admin/feedback/') && request.method === 'GET') {
+    const stub = feedbackStub(env);
+    if (!stub) return json({ code: 'feedback_unavailable', message: '反馈服务未启用' }, 503);
+    if (url.pathname === '/admin/feedback/stats') return json(await stub.stats());
+    if (url.pathname === '/admin/feedback/export') return run(() => stub.export({
+      kind: url.searchParams.get('kind') || 'current', after: Number(url.searchParams.get('after') || 0),
+      limit: Number(url.searchParams.get('limit') || 200),
+      ...(url.searchParams.has('until') ? { until: Number(url.searchParams.get('until')) } : {}),
+    }));
+  }
 
   // 独立超管凭证由管理端预先生成并私下保存。客户端无权自行创建/升级超管。
   if (url.pathname === '/admin/owner' && request.method === 'POST') {

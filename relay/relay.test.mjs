@@ -311,3 +311,25 @@ test('状态接口返回额度和限制；发布并读取更新清单与名单�
   assert.ok(list.price.credits_per_cny > 0);
   assert.ok(!JSON.stringify(list).includes(code));
 });
+
+test('翻译仅允许有效账号，三类账号同权限，不依赖抓取余额或客户端角色', async () => {
+  const { call, admin, env } = setup(okUpstream(0));
+  let calls = 0;
+  env.TRANSLATION = { idFromName: (n) => n, get: () => ({ translate: async (account, body) => {
+    calls++; assert.match(account, /^DF-/); assert.deepEqual(Object.keys(body), ['texts']);
+    return { ok: true, texts: ['你好'], cached: false };
+  } }) };
+  assert.equal((await call('/v1/translate', { method: 'POST', body: { texts: ['hello'] } })).status, 401);
+  assert.equal(calls, 0);
+  for (const plan of ['owner', 'beta', 'paid']) {
+    const created = await newCode(call, { name: '翻译测试', plan });
+    const token = created.account.account_no;
+    const r = await call('/v1/translate', { method: 'POST', token, body: { texts: ['hello'], role: 'owner', to: 'fr' } });
+    assert.equal(r.status, 200); assert.equal(r.headers.get('Cache-Control'), 'no-store');
+    assert.deepEqual((await r.json()).texts, ['你好']);
+    assert.equal((await call('/v1/translate', { method: 'POST', token, body: { texts: ['a'.repeat(16001)] } })).status, 400);
+    await admin('/admin/account', { ref: token, patch: { disabled: true } });
+    assert.equal((await call('/v1/translate', { method: 'POST', token, body: { texts: ['hello'] } })).status, 401);
+  }
+  assert.equal(calls, 3);
+});

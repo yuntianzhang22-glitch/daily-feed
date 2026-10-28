@@ -44,13 +44,13 @@ class FeedClient {
     this.quota = null;
   }
 
-  async request(url, init) {
+  async request(url, init, maxRetries = this.maxRetries) {
     for (let attempt = 0; ; attempt++) {
       let res;
       try {
         res = await this.fetch(url, { ...init, signal: AbortSignal.timeout(30000) });
       } catch (e) {
-        if (attempt < this.maxRetries) { await this.sleep(2000 * 2 ** attempt); continue; }
+        if (attempt < maxRetries) { await this.sleep(2000 * 2 ** attempt); continue; }
         throw new ApiError(this.mode === 'relay' ? '网络连接失败，请检查网络后重试' : `网络错误：${e.cause?.code || e.message}`, 0, 'network');
       }
       // 429 限流和 5xx 重试；中转的额度用尽 (429 + quota_exceeded) 不重试
@@ -60,10 +60,28 @@ class FeedClient {
       if (res.ok) return body || {};
       const code = body && body.code;
       const retryable = (res.status === 429 && code !== 'quota_exceeded') || res.status >= 500;
-      if (retryable && attempt < this.maxRetries) { await this.sleep(2000 * 2 ** attempt); continue; }
+      if (retryable && attempt < maxRetries) { await this.sleep(2000 * 2 ** attempt); continue; }
       const msg = (body && (body.message || body.error || body.msg)) || text.slice(0, 200) || res.statusText;
-      throw new ApiError(friendly(res.status, code, msg, body, this.mode), res.status, code);
+      const error = new ApiError(friendly(res.status, code, msg, body, this.mode), res.status, code);
+      error.body = body; throw error;
     }
+  }
+
+  async feedbackRequest(path, body) {
+    if (this.mode !== 'relay') throw new ApiError('请先登录账号后反馈', 401, 'no_access');
+    return this.request(`${this.relayUrl}/v1/feedback${path}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.accessCode}` }, body: JSON.stringify(body),
+    }, 0);
+  }
+  submitFeedback(event) { return this.feedbackRequest('', event); }
+  readFeedback(ids) { return this.feedbackRequest('/read', { ids }); }
+
+  async translate(texts) {
+    if (this.mode !== 'relay') throw new ApiError('请先登录账号后使用翻译', 401, 'no_access');
+    return this.request(`${this.relayUrl}/v1/translate`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.accessCode}` },
+      body: JSON.stringify({ texts }),
+    }, 0); // Never automatically repeat a potentially billed translation.
   }
 
   // 搜索一页推文。返回 { tweets, has_next_page, next_cursor }
@@ -112,6 +130,9 @@ class FeedClient {
 }
 
 function friendly(status, code, msg, body, mode) {
+  if (['translation_input', 'translation_unavailable', 'translation_quota', 'translation_daily', 'translation_failed'].includes(code)) return msg;
+  if (['feedback_input', 'feedback_conflict', 'feedback_rate', 'feedback_failed', 'feedback_unavailable'].includes(code)) return msg;
+  if (code === 'bad_schedule') return msg;
   // 中转服务的供应商故障不能被误报为用户余额不足，也不向用户透出内部诊断文案。
   if (code === 'upstream') return '服务暂时不可用，请稍后重试或联系支持';
   if (code === 'invalid_code' || status === 401) return mode === 'direct' ? 'API Key 无效或已停用' : '登录账号无效或已停用，请联系支持';

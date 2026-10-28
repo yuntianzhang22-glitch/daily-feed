@@ -1,7 +1,7 @@
 {
   "name": "daily-feed",
   "productName": "Daily Feed",
-  "version": "0.10.2",
+  "version": "0.11.0",
   "private": true,
   "description": "X 帖子整理与推送桌面端（基于 twitterapi.io）",
   "main": "desktop/main.js",
@@ -12,12 +12,16 @@
     "dev": "node --import ./relay/test-loader.mjs dev/start.mjs test",
     "staging": "node --import ./relay/test-loader.mjs dev/start.mjs staging",
     "staging:live": "npm run staging -- --live",
-    "test": "ELECTRON_RUN_AS_NODE=1 electron --test test/core.test.js test/environment.test.cjs && node --import ./relay/test-loader.mjs --test relay/relay.test.mjs relay/ledger.test.mjs test/lab.test.mjs",
+    "mobile:dev": "node --import ./relay/test-loader.mjs dev/mobile.mjs",
+    "mobile:build": "node build/mobile.mjs",
+    "test:mobile": "node --import ./relay/test-loader.mjs --test test/mobile.test.mjs test/mobile-entry.test.mjs relay/mobile-schedule.test.mjs && node --test test/mobile-runtime.test.mjs && node --import ./relay/test-loader.mjs test/mobile-ui.mjs",
+    "mobile:deploy:entry": "node build/mobile-entry.mjs && wrangler pages deploy .local/mobile-entry --project-name daily-feed-reader --branch main --commit-dirty=true",
+    "test": "ELECTRON_RUN_AS_NODE=1 electron --test test/core.test.js test/environment.test.cjs test/feedback.test.cjs && node --import ./relay/test-loader.mjs --test relay/relay.test.mjs relay/ledger.test.mjs relay/translation.test.mjs relay/feedback.test.mjs test/feedback-integration.test.mjs test/lab.test.mjs && node --test test/translation-runtime.test.mjs test/feedback-runtime.test.mjs",
     "test:ui": "node --import ./relay/test-loader.mjs dev/start.mjs test --smoke && node --import ./relay/test-loader.mjs test/production-login.mjs",
     "relay:admin:production": "node relay/admin.mjs --env production",
     "relay:admin:staging": "node relay/admin.mjs --env staging",
     "relay:deploy:staging": "node dev/deploy-staging.mjs",
-    "relay:deploy:production": "wrangler deploy --config relay/wrangler.toml",
+    "relay:deploy:production": "npm run mobile:build && wrangler deploy --config relay/wrangler.toml",
     "release": "node build/release.mjs",
     "icon": "electron build/make-icon.js",
     "dist:organize": "node build/organize-dist.mjs",
@@ -25,6 +29,8 @@
   },
   "devDependencies": {
     "electron": "44.9.0",
+    "esbuild": "0.28.2",
+    "miniflare": "5.20261019.0-beta",
     "wrangler": "4.151.2"
   }
 }

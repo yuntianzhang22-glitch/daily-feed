@@ -17,6 +17,8 @@ let identity = { role: 'guest', permissions: {} };
 function applyIdentity(info) {
   identity = { role: info.role, permissions: info.permissions || {} };
   const p = identity.permissions;
+  // Re-read account-partitioned marks when login state changes, including logout.
+  refreshFeedbackControls(document);
   $('api-key-box').hidden = !p.configureApi;
   $('api-key').disabled = !p.configureApi;
   $('save-api-key').disabled = !p.configureApi;
@@ -203,6 +205,8 @@ async function loadFeed(reset = false) {
     return;
   }
   for (const t of tweets) feed.append(renderTweet(t));
+  const ids = tweets.map((t) => String(t.post?.id || t.id)).filter((id) => /^\d{1,25}$/.test(id));
+  api.syncFeedback(ids).then(() => refreshFeedbackControls(document)).catch(() => {});
   state.offset += tweets.length;
   state.hasMore = tweets.length === PAGE_SIZE;
   if (state.hasMore) {
@@ -569,6 +573,17 @@ function renderTweet(t) {
   } else {
     body.append(el('p', { class: 'tweet-text', text: t.text || '' }));
   }
+  if (p?.text || p?.quoted?.text || t.text) {
+    const texts = [p?.text || t.text || ''];
+    if (p?.quoted?.text) texts.push(p.quoted.text);
+    body.append(translationControl({ document, texts, translate: () => api.translate(String(t.id)), isCurrent: () => card.isConnected }));
+  }
+  const feedbackId = String(p?.id || t.id);
+  if (/^\d{1,25}$/.test(feedbackId)) body.append(feedbackControl({ document,
+    getState: () => api.feedbackState(feedbackId),
+    setValue: (value) => api.setFeedback(String(t.id), value, { view: state.view, sort: state.sort,
+      position: [...document.querySelectorAll('#feed article')].indexOf(card) }),
+    retry: () => api.retryFeedback(), isCurrent: () => card.isConnected }));
   body.append(foot);
   card.append(avatar, body);
   return card;
@@ -1026,6 +1041,8 @@ function initSchedulePickers() {
 let roster = { categories: [], people: [] };
 let followDraft = [];
 let rosterCat = 'all';
+let followHistory = [];
+let rosterSelectionAnchor = null;
 
 const lower = (s) => String(s || '').toLowerCase();
 
@@ -1033,13 +1050,18 @@ async function openFollows() {
   const [cfg, r] = await Promise.all([api.getConfig(), api.roster()]);
   roster = r;
   followDraft = [...(cfg.follows || [])];
+  followHistory = [];
+  rosterSelectionAnchor = null;
   $('roster-query').value = '';
   $('follows-error').textContent = '';
+  $('follows-feedback').textContent = '修改后点击「保存」生效，取消则放弃本次修改。';
   rosterCat = 'all';
   renderCats();
   renderRoster();
   renderFollowList();
   $('follows-dialog').showModal();
+  $('follows-dialog').querySelector('.dialog-body').scrollTop = 0;
+  $('follow-list').scrollTop = 0;
   $('roster-query').focus();
 }
 
@@ -1048,9 +1070,82 @@ function isFollowing(username) {
 }
 
 function toggleFollow(username, on) {
-  followDraft = followDraft.filter((f) => lower(f) !== lower(username));
-  if (on) followDraft.push(username);
+  const next = followDraft.filter((f) => lower(f) !== lower(username));
+  if (on) next.push(username);
+  changeFollows(next);
+}
+
+function changeFollows(next) {
+  const max = Number(accessLimits.max_follows) || 500;
+  const skipped = Math.max(0, next.length - max);
+  next = next.slice(0, max);
+  $('follows-error').textContent = skipped
+    ? `最多可关注 ${max} 人，已选至上限，另有 ${skipped} 人未选中。可取消部分选择后继续。` : '';
+  if (next.join(',') === followDraft.join(',')) {
+    syncRosterSelection();
+    return;
+  }
+  followHistory.push([...followDraft]);
+  followDraft = next;
+  $('follows-feedback').textContent = `已选择 ${followDraft.length} 人，点击「保存」生效；可撤销上一步。`;
   renderFollowList();
+  syncRosterSelection();
+}
+
+function undoFollows() {
+  if (!followHistory.length) return;
+  followDraft = followHistory.pop();
+  rosterSelectionAnchor = null;
+  $('follows-error').textContent = '';
+  $('follows-feedback').textContent = `已撤销上一步，恢复为 ${followDraft.length} 人。点击「保存」生效。`;
+  renderFollowList();
+  syncRosterSelection();
+}
+
+function matchingPeople() {
+  const q = lower($('roster-query').value.trim()).replace(/^@/, '');
+  return roster.people.filter((p) => (rosterCat === 'all' || p.category === rosterCat) &&
+    (!q || [p.username, p.name, p.bio].some((s) => lower(s).includes(q))));
+}
+
+function bulkFollow(mode) {
+  const matches = matchingPeople();
+  const names = new Set(matches.map((p) => lower(p.username)));
+  const keep = followDraft.filter((name) => !names.has(lower(name)) || mode === 'select');
+  const add = matches.filter((p) => !isFollowing(p.username) && mode !== 'deselect').map((p) => p.username);
+  rosterSelectionAnchor = null;
+  changeFollows([...keep, ...add]);
+}
+
+function syncRosterSelection() {
+  const matches = matchingPeople();
+  const selected = matches.filter((p) => isFollowing(p.username)).length;
+  const all = $('roster-select-all');
+  all.checked = matches.length > 0 && selected === matches.length;
+  all.indeterminate = selected > 0 && selected < matches.length;
+  all.disabled = !matches.length;
+  $('roster-deselect').disabled = !selected;
+  $('roster-invert').disabled = !matches.length;
+  $('roster-selection').textContent = `当前 ${matches.length} 人，已选 ${selected} 人`;
+  for (const box of $('roster-list').querySelectorAll('input[type="checkbox"]')) {
+    box.checked = isFollowing(box.dataset.username);
+  }
+}
+
+function selectRosterPerson(username, on, range) {
+  const names = matchingPeople().map((p) => p.username);
+  const anchor = names.indexOf(rosterSelectionAnchor);
+  const target = names.indexOf(username);
+  if (range && anchor >= 0 && target >= 0) {
+    const group = names.slice(Math.min(anchor, target), Math.max(anchor, target) + 1);
+    const affected = new Set(group.map(lower));
+    changeFollows(on
+      ? [...followDraft, ...group.filter((name) => !isFollowing(name))]
+      : followDraft.filter((name) => !affected.has(lower(name))));
+  } else {
+    rosterSelectionAnchor = username;
+    toggleFollow(username, on);
+  }
 }
 
 function personFor(username) {
@@ -1093,21 +1188,32 @@ function personRow(p, control) {
 }
 
 function renderRoster() {
-  const q = lower($('roster-query').value.trim()).replace(/^@/, '');
   const list = $('roster-list');
   list.replaceChildren();
-  const matches = roster.people.filter((p) => (rosterCat === 'all' || p.category === rosterCat) &&
-    (!q || [p.username, p.name, p.bio].some((s) => lower(s).includes(q))));
+  rosterSelectionAnchor = null;
+  const matches = matchingPeople();
   if (!matches.length) {
     list.append(el('li', { class: 'empty-row', text: '名单里没有匹配的人。需要添加新的人可联系支持。' }));
   }
   for (const p of matches) {
     const id = `pick-${p.username}`;
     const box = el('input', { type: 'checkbox', id, 'aria-label': `关注 ${p.name || p.username}` });
+    box.dataset.username = p.username;
     box.checked = isFollowing(p.username);
-    box.addEventListener('change', () => toggleFollow(p.username, box.checked));
-    list.append(personRow(p, box));
+    // click 同时覆盖鼠标和键盘空格，并保留 Shift 修饰键。
+    box.addEventListener('click', (event) => selectRosterPerson(p.username, box.checked, event.shiftKey));
+    const row = personRow(p, box);
+    row.classList.add('pickable');
+    row.addEventListener('mousedown', (event) => { if (event.shiftKey) event.preventDefault(); });
+    row.addEventListener('click', (event) => {
+      if (event.target === box) return;
+      box.focus();
+      selectRosterPerson(p.username, !isFollowing(p.username), event.shiftKey);
+    });
+    list.append(row);
   }
+  list.scrollTop = 0;
+  syncRosterSelection();
   $('roster-hint').textContent = `名单共 ${roster.people.length} 人，更新于 ${roster.updated || '-'}。`;
 }
 
@@ -1115,6 +1221,9 @@ function renderFollowList() {
   const list = $('follow-list');
   list.replaceChildren();
   $('follow-count').textContent = `（${followDraft.length} 人）`;
+  $('follows-draft-count').textContent = `已选 ${followDraft.length} 人，保存后生效`;
+  $('clear-follows').disabled = !followDraft.length;
+  $('undo-follows').disabled = !followHistory.length;
   if (!followDraft.length) {
     list.append(el('li', { class: 'empty-row', text: '还没有关注任何人，在上面勾选' }));
   }
@@ -1122,7 +1231,7 @@ function renderFollowList() {
     const p = personFor(username);
     const btn = el('button', {
       class: 'btn', type: 'button', text: '移除', 'aria-label': `移除 @${username}`,
-      onclick: () => { toggleFollow(username, false); renderRoster(); },
+      onclick: () => toggleFollow(username, false),
     });
     list.append(personRow(p, btn));
   }
@@ -1359,7 +1468,16 @@ $('update-later').addEventListener('click', () => $('update-dialog').close());
 $('update-dialog').addEventListener('cancel', (event) => { if (updateInstalling) event.preventDefault(); });
 $('reveal-data').addEventListener('click', () => api.revealData());
 $('follows-btn').addEventListener('click', openFollows);
-$('roster-query').addEventListener('input', debounce(renderRoster, 100));
+$('roster-query').addEventListener('input', renderRoster);
+$('roster-select-all').addEventListener('change', (event) => bulkFollow(event.target.checked ? 'select' : 'deselect'));
+$('roster-deselect').addEventListener('click', () => bulkFollow('deselect'));
+$('roster-invert').addEventListener('click', () => bulkFollow('invert'));
+$('clear-follows').addEventListener('click', () => {
+  rosterSelectionAnchor = null;
+  changeFollows([]);
+  $('follows-feedback').textContent = '已清空待保存的关注列表。可撤销上一步，点击「保存」生效。';
+});
+$('undo-follows').addEventListener('click', undoFollows);
 $('save-follows').addEventListener('click', saveFollows);
 $('cancel-follows').addEventListener('click', () => $('follows-dialog').close());
 
@@ -1380,3 +1498,7 @@ $('cancel-follows').addEventListener('click', () => $('follows-dialog').close())
     setStatus(info.error || scheduleText(), Boolean(info.error));
   }
 })();
+
+window.addEventListener('online', () => {
+  api.syncFeedback([]).then(() => refreshFeedbackControls(document)).catch(() => {});
+});

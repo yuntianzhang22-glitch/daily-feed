@@ -515,3 +515,16 @@ test('验收更新只接受自己的本机下载地址，不能下载正式包�
     assert.strictEqual(requests, 1);
   }
 });
+
+test('翻译请求不自动重试或消耗抓取积分，直连模式须先登录', async () => {
+  for (const status of [429, 502]) {
+    let calls = 0;
+    const client = new FeedClient({ mode: 'relay', relayUrl: 'https://r', accessCode: 'test', fetchImpl: async () => {
+      calls++; return new Response(JSON.stringify({ code: 'translation_failed', message: '翻译暂时失败' }), { status });
+    }, sleep: async () => assert.fail('翻译不能自动重试') });
+    await assert.rejects(client.translate(['hello']), /翻译暂时失败/);
+    assert.equal(calls, 1); assert.equal(client.creditsUsed, 0);
+  }
+  const direct = new FeedClient({ mode: 'direct', apiKey: 'k', fetchImpl: () => assert.fail('不能使用 X API key 调翻译') });
+  await assert.rejects(direct.translate(['hello']), /请先登录/);
+});
