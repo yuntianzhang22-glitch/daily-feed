@@ -38,10 +38,10 @@
     <main id="content">
       <section id="reading" aria-labelledby="reading-title">
         <div class="section-title"><div><p class="eyebrow" id="today"></p><h1 id="reading-title">全部</h1></div><span class="hint" id="total"></span></div>
-        <div class="filters" role="group" aria-label="阅读筛选"><button data-view="all" aria-pressed="true">全部</button><button data-view="unread" aria-pressed="false">未读</button><button data-view="starred" aria-pressed="false">收藏</button></div>
+        <div class="filters" role="group" aria-label="阅读筛选"><button data-view="selected">精选</button><button data-view="all" aria-pressed="true">全部</button><button data-view="unread" aria-pressed="false">未读</button><button data-view="starred" aria-pressed="false">收藏</button></div>
         <input id="search" type="search" placeholder="搜索内容或作者" aria-label="搜索内容或作者">
         <div class="feed-tools"><select id="source" aria-label="按来源筛选"><option value="">所有来源</option></select><select id="sort" aria-label="排序"><option value="time">最新发布</option><option value="likes">最多点赞</option></select><button id="mark-read" class="text-button">全部已读</button></div>
-        <div id="feed" aria-label="帖子列表"></div>
+        <p id="selection-help" class="hint" hidden>从当前筛选的最近500条中推荐最多20条，合并相似内容。分数是规则估计的阅读优先级。</p><div id="feed" aria-label="帖子列表"></div>
         <button id="load-more" class="secondary full" hidden>加载更多</button>
       </section>
       <section id="following" hidden aria-labelledby="following-title">
@@ -90,7 +90,7 @@
           <button id="save-schedule" type="submit" class="primary full" disabled>保存定时设置</button>
           <p class="hint">由云端执行，关闭手机页面后仍会运行，使用同一账号的额度或余额。关闭开关并保存即可停止。</p>
         </form>
-        <form id="preferences" class="panel"><h2>抓取偏好</h2><label class="setting-row" for="search-mode"><span>内容排序</span><select id="search-mode"><option value="Top">热门内容</option><option value="Latest">最新内容</option></select></label><label class="setting-row" for="include-replies"><span>包含回复</span><input id="include-replies" type="checkbox" role="switch"></label><p class="hint">每人每次最多保留 3 条。</p><button type="submit" class="secondary">保存偏好</button></form>
+        <form id="preferences" class="panel"><h2>抓取偏好</h2><label class="setting-row" for="search-mode"><span>内容排序</span><select id="search-mode"><option value="Top">热门内容</option><option value="Latest">最新内容</option></select></label><label class="setting-row" for="include-replies"><span>包含回复</span><input id="include-replies" type="checkbox" role="switch"></label><p class="hint">每人每次最多保留 3 条。</p><label>精选关注主题（可选，逗号分隔）<input id="ranking-topics" type="text" maxlength="820" placeholder="例如 AI、产品设计；留空不限主题"></label><button type="submit" class="secondary">保存偏好</button></form>
         <div class="panel"><h2>添加到主屏幕</h2><p class="hint">用 iPhone 的 Safari 打开此网址，点「分享」→「添加到主屏幕」。若出现「作为网页 App 打开」，保持开启。</p><p class="hint">已抓取的正文可离线阅读。图片和视频需要网络。请勿清除网站数据，以免丢失本机收藏和阅读记录。</p><button id="check-update" class="secondary">检查移动版更新</button></div>
         <button id="logout" class="secondary full danger">退出登录</button>
         <p class="hint version">Daily Feed · iPhone 内测版 <span id="version"></span></p>

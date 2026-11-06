@@ -1,3 +1,4 @@
+const { cleanTopics } = require('./ranking');
 // 用户配置：读写 ~/Library/Application Support/Daily Feed/config.json。
 // 带版本号，旧格式（包括 Python 版写的）在读取时自动迁移，迁移前先备份。
 const fs = require('fs');
@@ -9,6 +10,7 @@ const CONFIG_VERSION = 3;
 const DEFAULTS = {
   version: CONFIG_VERSION,
   follows: [],
+  ranking_topics: [],
   keywords: [],
   // 定时抓取总开关。关闭时保留下面选好的天和时间，重新打开就恢复
   schedule_enabled: true,
@@ -72,6 +74,7 @@ function clean(cfg, limits = {}) {
   return {
     version: CONFIG_VERSION,
     follows: cleanUsernames(cfg.follows).slice(0, maxFollows),
+    ranking_topics: cleanTopics(cfg.ranking_topics),
     keywords: (cfg.keywords || []).map((k) => String(k).trim()).filter(Boolean).slice(0, 20),
     // 没有这个字段的旧配置视为开启
     schedule_enabled: cfg.schedule_enabled !== false,

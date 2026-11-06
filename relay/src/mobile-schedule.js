@@ -1,13 +1,14 @@
+import ranking from '../../desktop/core/ranking.js';
 import fetcher from '../../desktop/core/fetcher.js';
 import clientModule from '../../desktop/core/client.js';
 
 const DAY = 86400000;
 const OFFSET = 8 * 3600000;
 export const scheduleDefaults = () => ({ enabled: false, days: [1, 4], time: '09:00',
-  time_zone: 'Asia/Shanghai', follows: [], search_mode: 'Top', include_replies: false, revision: 0 });
+  time_zone: 'Asia/Shanghai', follows: [], search_mode: 'Top', include_replies: false, ranking_topics: [], revision: 0 });
 
 export function validateSchedule(body, account, before = scheduleDefaults()) {
-  const keys = ['enabled', 'days', 'time', 'follows', 'search_mode', 'include_replies', 'time_zone'];
+  const keys = ['enabled', 'days', 'time', 'follows', 'search_mode', 'include_replies', 'time_zone', 'ranking_topics'];
   if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some((key) => !keys.includes(key))) throw new Error('定时设置格式无效');
   const next = { ...before, ...body };
   if (typeof next.enabled !== 'boolean' || typeof next.include_replies !== 'boolean') throw new Error('开关格式无效');
@@ -18,6 +19,8 @@ export function validateSchedule(body, account, before = scheduleDefaults()) {
   if (!['Top', 'Latest'].includes(next.search_mode)) throw new Error('内容排序无效');
   if (!Array.isArray(next.follows) || next.follows.some((n) => typeof n !== 'string' || !/^[A-Za-z0-9_]{1,15}$/.test(n))) throw new Error('关注用户名无效');
   next.follows = fetcher.cleanUsernames(next.follows);
+  if (next.ranking_topics != null && (!Array.isArray(next.ranking_topics) || next.ranking_topics.length > 20 || next.ranking_topics.some(t => typeof t !== 'string' || t.length > 40))) throw new Error('精选主题格式无效');
+  next.ranking_topics = ranking.cleanTopics(next.ranking_topics);
   if (next.enabled && !next.follows.length) throw new Error('请先保存关注的人');
   const maxDays = account.plan === 'owner' ? 7 : Number(account.limits?.max_runs_per_week ?? 7);
   const maxFollows = account.plan === 'owner' ? 60 : Number(account.limits?.max_follows ?? 60);
@@ -88,7 +91,7 @@ export class ScheduledFeed {
     try {
       const account = await this.accountStatus(accountNo);
       if (account.error) throw new Error('账号无效或已停用，请重新登录后保存定时设置');
-      validateSchedule(Object.fromEntries(['enabled', 'days', 'time', 'follows', 'search_mode', 'include_replies', 'time_zone'].map((key) => [key, config[key]])), account, config);
+      validateSchedule(Object.fromEntries(['enabled', 'days', 'time', 'follows', 'search_mode', 'include_replies', 'time_zone', 'ranking_topics'].map((key) => [key, config[key]])), account, config);
       const client = new clientModule.FeedClient({ mode: 'relay', relayUrl: 'https://mobile.internal', accessCode: accountNo,
         maxRetries: 0, fetchImpl: (url, init) => this.search(new Request(url, init)) });
       const state = await this.storage.get('state') || {};

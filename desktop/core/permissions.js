@@ -2,7 +2,7 @@
 // 超管来自服务端授予的 owner 账号或已有本机 API 凭据，页面不能自行提交身份。
 const COMMON_SETTINGS = [
   'version', 'follows', 'schedule_enabled', 'schedule_days', 'schedule_time',
-  'max_per_target', 'search_mode', 'include_replies',
+  'max_per_target', 'search_mode', 'include_replies', 'ranking_topics',
 ];
 const OWNER_SETTINGS = ['keywords', 'group_size', 'max_pages', 'avg_posts_per_day'];
 

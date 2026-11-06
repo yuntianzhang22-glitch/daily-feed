@@ -39,6 +39,23 @@ app.whenReady().then(async () => {
       throw new Error('验收面板没有初始化');
     };
     await ready();
+    await run(`api.saveConfig({ranking_topics:['AI','产品']})`);
+    await run(`selectView('selected')`);
+    for (let i = 0; i < 100; i++) {
+      if (await run(`Boolean(document.querySelector('#feed .ranking-explanation'))`)) break;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    assert.ok(await run(`document.querySelector('#feed .ranking-explanation').textContent.includes('推荐分')`));
+    assert.equal(await run(`document.getElementById('sort').disabled`), true);
+    assert.ok((await run(`api.list({selected:true})`)).every(t => t.ranking.version === 'rules-v1'));
+    await run(`(async () => {
+      const row = (await api.list({selected:true}))[0];
+      await api.setFeedback(row.id, 1, { view:'selected', ranking:row.ranking });
+      await api.setFeedback(row.id, 0, { view:'selected', ranking:row.ranking });
+    })()`);
+    await run(`selectView('all')`);
+    assert.equal(await run(`document.getElementById('sort').disabled`), false);
+    console.log('传统精选验收通过：真实列表评分、解释、主题配置与全部切换。');
     // 实际页面必须完整显示长正文和引用长帖，不得只通过解析器单测。
     const longText = '研究解读 👋 '.repeat(70) + '外层全文结尾';
     const quoteText = '方法、实验与结果。'.repeat(90) + '引用全文结尾';
@@ -100,7 +117,12 @@ app.whenReady().then(async () => {
     await waitFeedback(`document.querySelector('#feed .feedback-buttons button:nth-child(2)').getAttribute('aria-pressed') === 'false' && !document.querySelector('#feed .feedback-button').disabled`);
     const response = await fetch(process.env.DAILY_FEED_LAB_URL + '/admin/feedback/stats', { headers: { Authorization: 'Bearer ' + process.env.DAILY_FEED_LAB_TOKEN } });
     const stats = await response.json();
-    assert.equal(stats.totals.changes, 3); assert.equal(stats.totals.up, 0); assert.equal(stats.totals.down, 0);
+    assert.equal(stats.totals.changes, 5); assert.equal(stats.totals.up, 0); assert.equal(stats.totals.down, 0);
+    const exportResponse = await fetch(process.env.DAILY_FEED_LAB_URL + '/admin/feedback/export?kind=events', { headers: { Authorization: 'Bearer ' + process.env.DAILY_FEED_LAB_TOKEN } });
+    const events = (await exportResponse.json()).records;
+    const selectedEvent = events.find(e => e.context.algorithm_version === 'rules-v1');
+    assert.ok(selectedEvent?.context.ranking?.features);
+    assert.equal(selectedEvent.context.ranking.weights.relevance,25);
     console.log('桌面反馈验收通过：真实按钮/IPC/服务端存储/改踩/取消/统计，未调用 X。');
     await require('./follows-ui.cjs')(run, win);
     await run('openSettings().then(() => renderAccess())');

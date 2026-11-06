@@ -26,6 +26,7 @@
       </section>
       <nav>
         <ul class="nav-list" id="views">
+          <li><button class="nav-item" data-view="selected">精选</button></li>
           <li><button class="nav-item active" data-view="all">全部 <span class="badge" id="count-all"></span></button></li>
           <li><button class="nav-item" data-view="unread">未读 <span class="badge" id="count-unread"></span></button></li>
           <li><button class="nav-item" data-view="starred">收藏 <span class="badge" id="count-starred"></span></button></li>
@@ -56,6 +57,7 @@
         </select>
         <button class="btn" id="mark-read-btn">全部标为已读</button>
       </header>
+      <p id="selection-help" hidden>从当前筛选的最近500条中推荐最多20条，合并相似内容。分数是规则估计的阅读优先级。</p>
       <section class="feed" id="feed" aria-label="帖子列表" tabindex="-1"></section>
     </main>
   </div>
@@ -210,6 +212,7 @@
       <label class="checkbox">
         <input type="checkbox" id="include-replies" /> 包含回复
       </label>
+      <label>精选关注主题（可选，逗号分隔）<input id="ranking-topics" type="text" maxlength="820" placeholder="例如 AI、产品设计；留空不限制主题" /></label>
       <details id="keywords-box" hidden>
         <summary>高级：额外关键词（仅超管）</summary>
         <label>

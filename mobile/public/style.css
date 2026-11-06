@@ -154,3 +154,7 @@ main { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior-y: c
 .feedback-button[aria-pressed="true"] { background: #215ec9; color: #fff; border-radius: 8px; }
 .feedback-button[hidden] { display: none; }
 .feedback-status { font-size: 12px; color: var(--muted, #8899a6); overflow-wrap: anywhere; }
+
+.ranking-explanation { margin: 12px 0; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.ranking-explanation summary { cursor: pointer; min-height: 44px; padding: 10px 0; }
+#selection-help { margin: 8px 16px; font-size: 13px; overflow-wrap: anywhere; }

@@ -62,3 +62,13 @@ test('失败事务回滚、输入限制与无效帖子不能进入样本', () =>
   assert.throws(() => store.submit('a', normalizeFeedback(event()), 'hash'));
   assert.equal(store.stats().totals.changes, 0); db.close();
 });
+
+test('精选反馈保存可复现的规则得分、特征和版本，拒绝无效特征', async () => {
+  const ranking = (await import('../desktop/core/ranking.js')).default;
+  const raw = sample();
+  const r = ranking.ranked([raw])[0].ranking;
+  const normalized = normalizeFeedback({ ...event(), context: { view: 'selected', algorithm_version: ranking.VERSION, ranking: r } });
+  assert.equal(normalized.context.ranking.score, r.score);
+  assert.deepEqual(normalized.context.ranking.weights, ranking.WEIGHTS);
+  assert.throws(() => normalizeFeedback({ ...event(), context: { algorithm_version: ranking.VERSION, ranking: { ...r, features: { ...r.features, relevance: 10 } } } }), { code: 'feedback_input' });
+});

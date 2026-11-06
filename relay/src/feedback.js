@@ -1,3 +1,4 @@
+import ranking from '../../desktop/core/ranking.js';
 // Feedback is client-reported evidence, not a verified assertion about an X post.
 export class FeedbackError extends Error {
   constructor(code, message, status = 400, current) { super(message); Object.assign(this, { code, status, current }); }
@@ -37,6 +38,18 @@ export function normalizeFeedback(body) {
     app_version: str(c.app_version, 40, true), view: str(c.view, 40, true), sort: str(c.sort, 40, true),
     algorithm_version: str(c.algorithm_version, 80, true) || 'baseline-v1',
     position: Number.isInteger(c.position) && c.position >= 0 && c.position < 100000 ? c.position : null };
+  if (c.ranking && c.algorithm_version === ranking.VERSION) {
+    const r = c.ranking;
+    if (!Number.isFinite(r.score) || r.score < 0 || r.score > 100) fail();
+    const features = {};
+    for (const key of Object.keys(ranking.WEIGHTS)) {
+      if (!Number.isFinite(r.features?.[key]) || r.features[key] < 0 || r.features[key] > 1) fail();
+      features[key] = r.features[key];
+    }
+    context.ranking = { version: ranking.VERSION, score: r.score, features, weights: { ...ranking.WEIGHTS },
+      noise_penalty: Math.min(20, Math.max(0, Number(r.noise_penalty) || 0)),
+      diversity_penalty: Math.min(30, Math.max(0, Number(r.diversity_penalty) || 0)) };
+  }
   return { event_id: body.event_id, value: body.value, expected_revision: body.expected_revision, snapshot, context };
 }
 export function validateIds(ids) {

@@ -106,3 +106,15 @@ test('定时额度不足和分组部分失败：不重复消费，保留已完�
   assert.equal((await empty.posts()).tweets.length, 0);
   assert.equal(lab.ledger.status(exhausted).quota.used_credits, 300);
 });
+
+test('云端主题按账号保存，旧客户端省略时保留；拒绝无效主题输入', async t => {
+ const {call,number,config}=await setup(t);
+ const saved=await call('schedule',number(),{...config, ranking_topics:['AI','产品']});
+ assert.equal(saved.status,200);
+ assert.deepEqual((await saved.json()).config.ranking_topics,['ai','产品']);
+ const legacy=await call('schedule',number(),config);
+ assert.equal(legacy.status,200);
+ assert.deepEqual((await legacy.json()).config.ranking_topics,['ai','产品']);
+ for(const ranking_topics of ['AI',[1],Array(21).fill('AI')]) assert.equal((await call('schedule',number(),{...config,ranking_topics})).status,400);
+ assert.deepEqual((await (await call('schedule',number('paid'))).json()).config.ranking_topics,[]);
+});

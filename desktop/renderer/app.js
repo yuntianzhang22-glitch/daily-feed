@@ -172,15 +172,16 @@ function selectView(view, source = null) {
     $('view-title').textContent = name;
   } else {
     document.querySelector(`[data-view="${view}"]`).classList.add('active');
-    $('view-title').textContent = { all: '全部', unread: '未读', starred: '收藏' }[view];
+    $('view-title').textContent = { all: '全部', selected: '精选', unread: '未读', starred: '收藏' }[view];
   }
-  loadFeed(true);
+  return loadFeed(true);
 }
 
 // ------------------------------------------------------------ 帖子列表
 
 function listParams() {
   return {
+    selected: state.view === 'selected',
     source: state.view === 'source' ? state.source : null,
     unread: state.view === 'unread',
     starred: state.view === 'starred',
@@ -193,6 +194,8 @@ function listParams() {
 
 async function loadFeed(reset = false) {
   const feed = $('feed');
+  $('selection-help').hidden = state.view !== 'selected';
+  $('sort').disabled = state.view === 'selected';
   if (reset) {
     state.offset = 0;
     feed.replaceChildren();
@@ -581,9 +584,16 @@ function renderTweet(t) {
   const feedbackId = String(p?.id || t.id);
   if (/^\d{1,25}$/.test(feedbackId)) body.append(feedbackControl({ document,
     getState: () => api.feedbackState(feedbackId),
-    setValue: (value) => api.setFeedback(String(t.id), value, { view: state.view, sort: state.sort,
+    setValue: (value) => api.setFeedback(String(t.id), value, { view: state.view, sort: state.sort, ranking: t.ranking,
       position: [...document.querySelectorAll('#feed article')].indexOf(card) }),
     retry: () => api.retryFeedback(), isCurrent: () => card.isConnected }));
+  if (t.ranking) {
+    const details = el('details', { class: 'ranking-explanation' });
+    details.append(el('summary', { text: `推荐分 ${t.ranking.score} · 为什么推荐` }));
+    details.append(el('p', { text: t.ranking.reasons.join('；') }));
+    details.append(el('p', { text: Object.entries(t.ranking.contributions).map(([k,v]) => ({relevance:'主题',specificity:'具体信息',sources:'来源',explanation:'解释方法',freshness:'时效',engagement:'相对热度'}[k] + ' +' + v.toFixed(1))).join(' · ') }));
+    body.append(details);
+  }
   body.append(foot);
   card.append(avatar, body);
   return card;
@@ -784,6 +794,7 @@ async function openSettings() {
   $('search-mode').value = cfg.search_mode === 'Latest' ? 'Latest' : 'Top';
   $('avg-posts').value = cfg.avg_posts_per_day ?? 2;
   $('include-replies').checked = Boolean(cfg.include_replies);
+  $('ranking-topics').value = (cfg.ranking_topics || []).join('，');
   $('keywords').value = (cfg.keywords || []).join('\n');
   $('settings-error').textContent = '';
   $('access-code').value = '';
@@ -911,6 +922,7 @@ function settingsForm() {
     schedule_time: timeValue(),
     max_per_target: Number($('max-per-target').value) || 0,
     search_mode: $('search-mode').value,
+    ranking_topics: $('ranking-topics').value.split(/[,，、\n]/).map(s => s.trim()).filter(Boolean),
     include_replies: $('include-replies').checked,
     ...(identity.permissions.configureKeywords ? { keywords: lines($('keywords').value) } : {}),
     ...(identity.permissions.viewApiCosts ? { avg_posts_per_day: Number($('avg-posts').value) || 0 } : {}),

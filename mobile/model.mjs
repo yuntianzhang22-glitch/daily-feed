@@ -1,3 +1,4 @@
+import ranking from '../desktop/core/ranking.js';
 import feedbackModule from '../desktop/core/feedback.js';
 import clientModule from '../desktop/core/client.js';
 import fetcher from '../desktop/core/fetcher.js';
@@ -7,7 +8,7 @@ import permissions from '../desktop/core/permissions.js';
 export const { extractPost } = postModule;
 export const { cleanUsernames } = fetcher;
 export const { verifiedAccountRole } = permissions;
-export const defaults = () => ({ follows: [], include_replies: false, search_mode: 'Top',
+export const defaults = () => ({ follows: [], ranking_topics: [], include_replies: false, search_mode: 'Top',
   max_per_target: 3, tweets: {}, state: {}, lastFetched: '' });
 
 // Browser storage is partitioned by the server's canonical account number.
@@ -81,7 +82,7 @@ export class MobileFeed {
     const record = this.data.tweets[id]; if (!record) throw new Error('帖子不存在');
     const snapshot = feedbackModule.snapshotFromRaw(record.raw, record.source);
     const { queue, guard } = await this.feedbackQueue();
-    const result = await queue.set(snapshot, value, { ...context, platform: 'mobile', algorithm_version: 'baseline-v1' });
+    const result = await queue.set(snapshot, value, { ...context, platform: 'mobile', algorithm_version: context?.view === 'selected' ? ranking.VERSION : 'baseline-v1' });
     guard(); return result;
   }
   async login(code) {
@@ -169,7 +170,7 @@ export class MobileFeed {
     const owner = this.session?.code;
     const config = this.schedule?.config || { enabled: false, days: [1, 4], time: '09:00', time_zone: 'Asia/Shanghai' };
     const body = { enabled: config.enabled, days: config.days, time: config.time, time_zone: 'Asia/Shanghai',
-      follows: this.data.follows, search_mode: this.data.search_mode, include_replies: this.data.include_replies, ...patch };
+      follows: this.data.follows, ranking_topics: ranking.cleanTopics(this.data.ranking_topics), search_mode: this.data.search_mode, include_replies: this.data.include_replies, ...patch };
     const schedule = await this.mobileRequest('schedule', body);
     if (this.session?.code !== owner) throw new Error('登录状态已变化，请重试');
     this.schedule = schedule;
@@ -200,12 +201,13 @@ export class MobileFeed {
   }
   list({ view = 'all', query = '', source = '', sort = 'time' } = {}) {
     const needle = query.trim().toLocaleLowerCase();
-    return Object.values(this.data.tweets).filter((t) =>
+    const records = Object.values(this.data.tweets).filter((t) =>
       (view !== 'unread' || !t.read) && (view !== 'starred' || t.starred) &&
       (!source || t.source === source) && (!needle ||
         [t.raw.text, t.raw.author?.name, t.raw.author?.userName, extractPost(t.raw)?.text].join(' ').toLocaleLowerCase().includes(needle)))
       .sort((a, b) => sort === 'likes' ? (Number(b.raw.likeCount) || 0) - (Number(a.raw.likeCount) || 0)
         : (Date.parse(b.raw.createdAt) || 0) - (Date.parse(a.raw.createdAt) || 0));
+    return view === 'selected' ? ranking.ranked(records.sort((a,b) => (Date.parse(b.raw.createdAt)||0)-(Date.parse(a.raw.createdAt)||0)).slice(0,500), { topics: this.data.ranking_topics, limit: 20 }) : records;
   }
   async fetchNow(progress = () => {}) {
     if (this.busy) throw new Error('正在抓取，请稍候');

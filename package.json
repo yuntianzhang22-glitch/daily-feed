@@ -16,7 +16,7 @@
     "mobile:build": "node build/mobile.mjs",
     "test:mobile": "node --import ./relay/test-loader.mjs --test test/mobile.test.mjs test/mobile-entry.test.mjs relay/mobile-schedule.test.mjs && node --test test/mobile-runtime.test.mjs && node --import ./relay/test-loader.mjs test/mobile-ui.mjs",
     "mobile:deploy:entry": "node build/mobile-entry.mjs && wrangler pages deploy .local/mobile-entry --project-name daily-feed-reader --branch main --commit-dirty=true",
-    "test": "ELECTRON_RUN_AS_NODE=1 electron --test test/core.test.js test/environment.test.cjs test/feedback.test.cjs && node --import ./relay/test-loader.mjs --test relay/relay.test.mjs relay/ledger.test.mjs relay/translation.test.mjs relay/feedback.test.mjs test/feedback-integration.test.mjs test/lab.test.mjs && node --test test/translation-runtime.test.mjs test/feedback-runtime.test.mjs",
+    "test": "ELECTRON_RUN_AS_NODE=1 electron --test test/core.test.js test/environment.test.cjs test/feedback.test.cjs test/ranking.test.cjs && node --import ./relay/test-loader.mjs --test relay/relay.test.mjs relay/ledger.test.mjs relay/translation.test.mjs relay/feedback.test.mjs test/feedback-integration.test.mjs test/lab.test.mjs && node --test test/translation-runtime.test.mjs test/feedback-runtime.test.mjs",
     "test:ui": "node --import ./relay/test-loader.mjs dev/start.mjs test --smoke && node --import ./relay/test-loader.mjs test/production-login.mjs",
     "relay:admin:production": "node relay/admin.mjs --env production",
     "relay:admin:staging": "node relay/admin.mjs --env staging",

@@ -20,7 +20,7 @@ let messageTimer;
 let scheduleDirty = false;
 let cloudRefresh;
 const scrollPositions = {};
-const names = { all: '全部', unread: '未读', starred: '收藏' };
+const names = { selected: '精选', all: '全部', unread: '未读', starred: '收藏' };
 const message = (text, error = false) => {
   clearTimeout(messageTimer);
   $('message').textContent = text;
@@ -214,6 +214,8 @@ function renderFeed() {
   const focusId = focused?.dataset?.id;
   const focusFlag = focused?.dataset?.flag;
   $('reading-title').textContent = names[view];
+  $('selection-help').hidden = view !== 'selected';
+  $('sort').disabled = view === 'selected';
   for (const button of document.querySelectorAll('[data-view]')) button.setAttribute('aria-pressed', String(button.dataset.view === view));
   const list = feed.list({ view, query: $('search').value, source: $('source').value, sort: $('sort').value });
   $('total').textContent = `${list.length} 条`;
@@ -245,8 +247,14 @@ function renderFeed() {
       const session = feed.session;
       article.append(feedbackView.feedbackControl({ document,
         getState: () => feed.feedbackState(post.id),
-        setValue: (value) => feed.setFeedback(String(tweet.raw.id), value, { app_version: __MOBILE_VERSION__, view, sort: $('sort').value, position: list.indexOf(tweet) }),
+        setValue: (value) => feed.setFeedback(String(tweet.raw.id), value, { app_version: __MOBILE_VERSION__, view, ranking: tweet.ranking, sort: $('sort').value, position: list.indexOf(tweet) }),
         retry: () => feed.retryFeedback(), isCurrent: () => feed.session === session && article.isConnected }));
+    }
+    if (tweet.ranking) {
+      const details = node('details', 'ranking-explanation');
+      details.append(node('summary', '', `推荐分 ${tweet.ranking.score} · 为什么推荐`), node('p', '', tweet.ranking.reasons.join('；')));
+      details.append(node('p', '', Object.entries(tweet.ranking.contributions).map(([k,v]) => ({relevance:'主题',specificity:'具体信息',sources:'来源',explanation:'解释方法',freshness:'时效',engagement:'相对热度'}[k] + ' +' + v.toFixed(1))).join(' · ')));
+      article.append(details);
     }
     article.append(actions);
     fragment.append(article);
@@ -340,6 +348,7 @@ function renderSettings() {
     : account?.plan === 'paid' ? `余额 ¥${Number(account.balance?.cny || 0).toFixed(2)}；充值时请备注账号编号。` : '已连接云端服务';
   $('search-mode').value = feed.data.search_mode;
   $('include-replies').checked = feed.data.include_replies;
+  $('ranking-topics').value = (feed.data.ranking_topics || []).join('，');
   $('version').textContent = __MOBILE_VERSION__;
 }
 function scheduleFields() {
@@ -498,14 +507,15 @@ $('preferences').addEventListener('submit', (event) => {
   event.preventDefault();
   action(async () => {
     if (feed.busy) throw new Error('请等待当前抓取完成后保存');
-    const before = { search_mode: feed.data.search_mode, include_replies: feed.data.include_replies };
+    const before = { search_mode: feed.data.search_mode, include_replies: feed.data.include_replies, ranking_topics: feed.data.ranking_topics };
     feed.data.search_mode = $('search-mode').value;
+    feed.data.ranking_topics = $('ranking-topics').value.split(/[,，、\n]/).map(s => s.trim()).filter(Boolean).slice(0,20).map(t=>t.slice(0,40));
     feed.data.include_replies = $('include-replies').checked;
     try {
       if (feed.schedule?.config?.enabled) await feed.saveSchedule({ search_mode: feed.data.search_mode, include_replies: feed.data.include_replies });
       await feed.save();
     } catch (e) { Object.assign(feed.data, before); throw e; }
-    message('抓取偏好已保存');
+    renderFeed(); message('偏好已保存');
   });
 });
 for (const id of ['schedule-enabled', 'schedule-frequency', 'schedule-time', 'schedule-days']) $(id).addEventListener('change', () => {

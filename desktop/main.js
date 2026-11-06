@@ -1,3 +1,4 @@
+const { VERSION: RANKING_VERSION } = require('./core/ranking');
 const { FeedbackQueue, snapshotFromRaw, POST_ID } = require('./core/feedback');
 // Electron 主进程：窗口、抓取（进程内 Node 后端）、定时、通知、访问码、内置名单、应用内更新。
 const {
@@ -423,7 +424,7 @@ async function feedbackQueue() {
 // ------------------------------------------------------------ IPC
 
 const handlers = {
-  list: (p) => store.list(p || {}),
+  list: (p) => store.list({ ...(p || {}), topics: config.load().ranking_topics }),
   sources: () => store.sources(),
   counts: () => store.counts(),
   set_flag: (p) => { const r = store.setFlag(p.ids, p.field, p.value); updateBadge(); return r; },
@@ -526,7 +527,7 @@ ipcMain.handle('feedback-set', async (_e, id, value, context) => {
   if (!row) throw new Error('帖子不存在');
   const snapshot = snapshotFromRaw(row.raw, row.source);
   const result = await queue.set(snapshot, value, { view: String(context?.view || '').slice(0, 40), sort: String(context?.sort || '').slice(0, 40),
-    position: context?.position, platform: 'desktop', app_version: app.getVersion(), algorithm_version: 'baseline-v1' });
+    position: context?.position, ranking: context?.view === 'selected' ? context.ranking : undefined, platform: 'desktop', app_version: app.getVersion(), algorithm_version: context?.view === 'selected' ? RANKING_VERSION : 'baseline-v1' });
   guard(); return result;
 });
 ipcMain.handle('feedback-retry', async () => {

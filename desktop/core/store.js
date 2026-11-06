@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
+const { ranked } = require('./ranking');
 const { extractPost } = require('./post');
 
 const SCHEMA = `
@@ -112,7 +113,7 @@ class Store {
 
   // ---- 查询与标记
 
-  list({ source = null, q = null, unread = false, starred = false, sort = 'time', limit = 200, offset = 0 } = {}) {
+  list({ source = null, q = null, unread = false, starred = false, sort = 'time', limit = 200, offset = 0, selected = false, topics = [] } = {}) {
     const where = [];
     const params = [];
     if (source) { where.push('source = ?'); params.push(source); }
@@ -125,6 +126,10 @@ class Store {
     if (starred) where.push('starred = 1');
     let sql = 'SELECT * FROM tweets';
     if (where.length) sql += ' WHERE ' + where.join(' AND ');
+    if (selected) {
+      const rows = this.db.prepare(sql + ' ORDER BY created_at DESC,id DESC LIMIT 500').all(...params);
+      return ranked(rows, { topics, limit: 20 }).slice(Math.max(0, Number(offset) || 0), Math.max(0, Number(offset) || 0) + Math.max(0, Number(limit) || 0)).map(rowToTweet);
+    }
     sql += ` ORDER BY ${SORT_ORDERS[sort] || SORT_ORDERS.time} LIMIT ? OFFSET ?`;
     params.push(Math.max(0, Number(limit) || 0), Math.max(0, Number(offset) || 0));
     return this.db.prepare(sql).all(...params).map(rowToTweet);

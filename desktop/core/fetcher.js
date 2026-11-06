@@ -1,3 +1,4 @@
+const { ranked } = require('./ranking');
 // 抓取逻辑和费用估算，从原 Python 版移植，状态键与 Python 版相同，可无缝接着抓。
 const { weeklyGapsHours } = require('./schedule');
 
@@ -50,12 +51,19 @@ async function collectFollowGroup(client, store, names, cfg, fetchedAt, now = Da
   const byLower = new Map(names.map((n) => [n.toLowerCase(), n]));
   const results = Object.fromEntries(names.map((n) => [`user:${n}`, []]));
   const query = `(${groupQuery(names, cfg.include_replies)}) since_time:${since}`;
-  for await (const page of client.search(query, Number(cfg.max_pages) || 1, mode)) {
-    for (const t of page) {
+  const candidates = new Map();
+  try {
+    for await (const page of client.search(query, Number(cfg.max_pages) || 1, mode)) {
+      for (const tweet of page) if (tweet?.id != null) candidates.set(String(tweet.id), tweet);
+    }
+  } finally {
+    // Rank returned candidates before the per-author cap; no extra API pages.
+    // Successful pages remain persisted even if a later network request fails.
+    for (const item of ranked([...candidates.values()], { now, topics: cfg.ranking_topics, deduplicate: false, diversify: false })) {
+      const { ranking, ...t } = item;
       const author = String((t.author || {}).userName || '').toLowerCase();
       const source = `user:${byLower.get(author) || author}`;
       const bucket = results[source] || (results[source] = []);
-      // 上限按人算，避免高产的人把整组名额占满
       if (cap && bucket.length >= cap) continue;
       if (store.save(t, source, fetchedAt)) bucket.push(t);
     }
@@ -74,7 +82,8 @@ async function collectKeyword(client, store, keyword, cfg, fetchedAt, now = Date
   const out = [];
   outer:
   for await (const page of client.search(`(${keyword}) since_time:${since}`, Number(cfg.max_pages) || 1, mode)) {
-    for (const t of page) {
+    for (const item of ranked(page, { now, topics: cfg.ranking_topics, deduplicate: false, diversify: false })) {
+      const { ranking, ...t } = item;
       if (cap && out.length >= cap) break outer;
       if (store.save(t, source, fetchedAt)) out.push(t);
     }
